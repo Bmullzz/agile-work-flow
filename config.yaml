@@ -1,0 +1,3 @@
+input_file: input/app-idea.md
+output_dir: output
+prompts_dir: prompts
