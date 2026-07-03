@@ -5,6 +5,7 @@ from pathlib import Path
 from scripts.llm_client import FakeLLMClient
 from scripts.models import WorkflowStep
 from scripts.workflow_runner import WorkflowRunError, WorkflowRunner
+from scripts.workflow_state import load_state
 from scripts.workflow_steps import WORKFLOW_STEPS
 
 
@@ -111,6 +112,10 @@ class WorkflowRunnerTests(unittest.TestCase):
         )
         self.assertTrue((self.output_root / "README.md").is_file())
         self.assertTrue((self.output_root / "project-context.md").is_file())
+        state = load_state(self.output_root / ".workflow-state.json")
+        self.assertEqual(state.workflow_status, "completed")
+        self.assertEqual(state.completed_steps, ["00-first"])
+        self.assertIn("00-first", state.output_files)
 
     def test_failure_stops_workflow(self):
         llm_client = RecordingLLMClient("not markdown")
@@ -127,6 +132,9 @@ class WorkflowRunnerTests(unittest.TestCase):
 
         self.assertIn("Step 00-first failed", str(error.exception))
         self.assertFalse((self.output_root / "01-second.md").exists())
+        state = load_state(self.output_root / ".workflow-state.json")
+        self.assertEqual(state.workflow_status, "failed")
+        self.assertEqual(state.failed_step, "00-first")
 
     def test_dependencies_are_enforced(self):
         step = WorkflowStep(
@@ -163,6 +171,9 @@ class WorkflowRunnerTests(unittest.TestCase):
         for step in WORKFLOW_STEPS:
             with self.subTest(step_id=step.step_id):
                 self.assertTrue((self.output_root / step.output_path).is_file())
+        state = load_state(self.output_root / ".workflow-state.json")
+        self.assertEqual(len(state.completed_steps), len(WORKFLOW_STEPS))
+        self.assertIn("README", state.output_files)
 
 
 if __name__ == "__main__":

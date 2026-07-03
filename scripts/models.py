@@ -61,6 +61,55 @@ class WorkflowStep:
         }
 
 
+@dataclass
+class WorkflowState:
+    project_name: str
+    input_file: str
+    output_folder: str
+    workflow_status: str = "not_started"
+    completed_steps: list[str] = field(default_factory=list)
+    output_files: dict[str, str] = field(default_factory=dict)
+    failed_step: str | None = None
+    current_step: str | None = None
+    next_step: str | None = None
+    approved_steps: list[str] = field(default_factory=list)
+    pending_review_step: str | None = None
+    stale_steps: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "project_name": self.project_name,
+            "input_file": self.input_file,
+            "output_folder": self.output_folder,
+            "workflow_status": self.workflow_status,
+            "completed_steps": list(self.completed_steps),
+            "output_files": dict(self.output_files),
+            "failed_step": self.failed_step,
+            "current_step": self.current_step,
+            "next_step": self.next_step,
+            "approved_steps": list(self.approved_steps),
+            "pending_review_step": self.pending_review_step,
+            "stale_steps": list(self.stale_steps),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "WorkflowState":
+        return cls(
+            project_name=data["project_name"],
+            input_file=data["input_file"],
+            output_folder=data["output_folder"],
+            workflow_status=data.get("workflow_status", "not_started"),
+            completed_steps=list(data.get("completed_steps", [])),
+            output_files=dict(data.get("output_files", {})),
+            failed_step=data.get("failed_step"),
+            current_step=data.get("current_step"),
+            next_step=data.get("next_step"),
+            approved_steps=list(data.get("approved_steps", [])),
+            pending_review_step=data.get("pending_review_step"),
+            stale_steps=list(data.get("stale_steps", [])),
+        )
+
+
 def _require_non_empty_string(value: str, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name} must be a non-empty string.")
