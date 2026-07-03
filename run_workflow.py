@@ -105,7 +105,10 @@ def create_llm_client(args: argparse.Namespace, config: dict):
 
 def main() -> None:
     args = parse_args()
-    selected_steps = select_workflow_steps(args)
+    try:
+        selected_steps = select_workflow_steps(args)
+    except KeyError as error:
+        raise SystemExit(str(error)) from error
     print_runtime_options(args, len(selected_steps))
 
     config = load_config(args.config)
@@ -117,12 +120,18 @@ def main() -> None:
 
     runner = WorkflowRunner(
         config=config,
-        workflow_steps=selected_steps,
+        workflow_steps=WORKFLOW_STEPS,
         llm_client=llm_client,
     )
 
     try:
-        result = runner.run(args.input, args.output)
+        result = runner.run(
+            args.input,
+            args.output,
+            resume=args.resume,
+            step_id=args.step,
+            from_step_id=args.from_step,
+        )
     except WorkflowRunError as error:
         raise SystemExit(str(error)) from error
 

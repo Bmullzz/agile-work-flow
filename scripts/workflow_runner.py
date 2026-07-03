@@ -42,6 +42,7 @@ class WorkflowRunError(RuntimeError):
 @dataclass
 class WorkflowRunResult:
     completed_step_ids: list[str] = field(default_factory=list)
+    skipped_step_ids: list[str] = field(default_factory=list)
     output_paths: dict[str, Path] = field(default_factory=dict)
     failed_step_id: Optional[str] = None
     errors: list[str] = field(default_factory=list)
@@ -76,7 +77,14 @@ class WorkflowRunner:
         self.output_validator = output_validator
         self.index_writer = index_writer or IndexWriter()
 
-    def run(self, input_path: str | Path, output_root: str | Path) -> WorkflowRunResult:
+    def run(
+        self,
+        input_path: str | Path,
+        output_root: str | Path,
+        resume: bool = False,
+        step_id: str | None = None,
+        from_step_id: str | None = None,
+    ) -> WorkflowRunResult:
         input_file = Path(input_path)
         output_directory = Path(output_root)
         result = WorkflowRunResult()
@@ -96,17 +104,49 @@ class WorkflowRunner:
         overwrite = bool(self.config.get("output", {}).get("overwrite", False))
         state = self._load_or_create_state(input_file, output_directory, state_path)
         self._save_state_safely(state, state_path)
+        steps_to_run = self._select_steps(
+            state,
+            output_directory,
+            resume=resume,
+            step_id=step_id,
+            from_step_id=from_step_id,
+        )
+        self._seed_completed_dependencies(
+            steps_to_run,
+            output_directory,
+            completed_steps,
+            completed_step_ids,
+        )
 
-        for index, step in enumerate(self.workflow_steps):
+        for index, step in enumerate(steps_to_run):
             print(f"[{step.step_id}] Starting {step.name}")
             try:
                 self._check_dependencies(step, completed_step_ids)
                 mark_step_started(
                     state,
                     step.step_id,
-                    next_step=self._next_step_id(index),
+                    next_step=self._next_step_id(steps_to_run, index),
                 )
                 self._save_state_safely(state, state_path)
+                existing_output = output_directory / step.output_path
+                if (
+                    not overwrite
+                    and self._is_existing_output_valid(step, output_directory)
+                ):
+                    completed_steps.append(step)
+                    completed_step_ids.add(step.step_id)
+                    result.completed_step_ids.append(step.step_id)
+                    result.skipped_step_ids.append(step.step_id)
+                    result.output_paths[step.step_id] = existing_output
+                    mark_step_completed(
+                        state,
+                        step.step_id,
+                        existing_output,
+                        next_step=self._next_step_id(steps_to_run, index),
+                    )
+                    self._save_state_safely(state, state_path)
+                    print(f"[{step.step_id}] Skipped existing valid output")
+                    continue
                 context = self.context_builder(
                     step, input_file, output_directory, completed_steps
                 )
@@ -138,7 +178,7 @@ class WorkflowRunner:
                 state,
                 step.step_id,
                 output_path,
-                next_step=self._next_step_id(index),
+                next_step=self._next_step_id(steps_to_run, index),
             )
             self._save_state_safely(state, state_path)
             print(f"[{step.step_id}] Wrote {output_path}")
@@ -191,6 +231,75 @@ class WorkflowRunner:
                 + ", ".join(missing)
             )
 
+    def _select_steps(
+        self,
+        state: WorkflowState,
+        output_directory: Path,
+        resume: bool,
+        step_id: str | None,
+        from_step_id: str | None,
+    ) -> list[WorkflowStep]:
+        if step_id and from_step_id:
+            raise WorkflowRunError("Use either --step or --from-step, not both.")
+
+        if step_id:
+            return [self._get_step_by_id(step_id)]
+
+        if from_step_id:
+            start_index = self._get_step_index(from_step_id)
+            return self.workflow_steps[start_index:]
+
+        if resume:
+            resume_step_id = state.next_step or self._first_incomplete_step_id(
+                state, output_directory
+            )
+            if resume_step_id is None:
+                print("[resume] No incomplete workflow steps found.")
+                return []
+            start_index = self._get_step_index(resume_step_id)
+            print(f"[resume] Continuing from {resume_step_id}")
+            return self.workflow_steps[start_index:]
+
+        return list(self.workflow_steps)
+
+    def _seed_completed_dependencies(
+        self,
+        steps_to_run: list[WorkflowStep],
+        output_directory: Path,
+        completed_steps: list[WorkflowStep],
+        completed_step_ids: set[str],
+    ) -> None:
+        if not steps_to_run:
+            return
+        first_index = self._get_step_index(steps_to_run[0].step_id)
+        for step in self.workflow_steps[:first_index]:
+            if self._is_existing_output_valid(step, output_directory):
+                completed_steps.append(step)
+                completed_step_ids.add(step.step_id)
+
+    def _first_incomplete_step_id(
+        self, state: WorkflowState, output_directory: Path
+    ) -> str | None:
+        completed_step_ids = set(state.completed_steps)
+        for step in self.workflow_steps:
+            if step.step_id not in completed_step_ids:
+                return step.step_id
+            if not self._is_existing_output_valid(step, output_directory):
+                return step.step_id
+        return None
+
+    def _get_step_by_id(self, step_id: str) -> WorkflowStep:
+        for step in self.workflow_steps:
+            if step.step_id == step_id:
+                return step
+        raise WorkflowRunError(f"Unknown workflow step ID: {step_id}")
+
+    def _get_step_index(self, step_id: str) -> int:
+        for index, step in enumerate(self.workflow_steps):
+            if step.step_id == step_id:
+                return index
+        raise WorkflowRunError(f"Unknown workflow step ID: {step_id}")
+
     def _validate_generated_markdown(self, step: WorkflowStep, content: str) -> None:
         validation = self.output_validator(content)
         if not validation["is_valid"]:
@@ -223,11 +332,21 @@ class WorkflowRunner:
         except WorkflowStateError as error:
             raise WorkflowRunError(f"State write failed: {error}") from error
 
-    def _next_step_id(self, index: int) -> str | None:
+    def _next_step_id(self, steps: list[WorkflowStep], index: int) -> str | None:
         next_index = index + 1
-        if next_index >= len(self.workflow_steps):
+        if next_index >= len(steps):
             return None
-        return self.workflow_steps[next_index].step_id
+        return steps[next_index].step_id
+
+    def _is_existing_output_valid(self, step: WorkflowStep, output_directory: Path) -> bool:
+        output_path = output_directory / step.output_path
+        if not output_path.exists() or not output_path.is_file():
+            return False
+        try:
+            content = output_path.read_text(encoding="utf-8")
+        except OSError:
+            return False
+        return bool(self.output_validator(content)["is_valid"])
 
     def _fail(
         self, result: WorkflowRunResult, step_id: str, message: str

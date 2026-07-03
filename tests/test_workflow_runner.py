@@ -5,7 +5,12 @@ from pathlib import Path
 from scripts.llm_client import FakeLLMClient
 from scripts.models import WorkflowStep
 from scripts.workflow_runner import WorkflowRunError, WorkflowRunner
-from scripts.workflow_state import load_state
+from scripts.workflow_state import (
+    create_initial_state,
+    load_state,
+    mark_step_completed,
+    save_state,
+)
 from scripts.workflow_steps import WORKFLOW_STEPS
 
 
@@ -17,6 +22,17 @@ class RecordingLLMClient:
     def generate(self, prompt: str) -> str:
         self.prompts.append(prompt)
         return self.response
+
+
+class SequencedLLMClient:
+    def __init__(self):
+        self.prompts = []
+        self.count = 0
+
+    def generate(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        self.count += 1
+        return f"# Generated {self.count}\n\nContent"
 
 
 class WorkflowRunnerTests(unittest.TestCase):
@@ -174,6 +190,153 @@ class WorkflowRunnerTests(unittest.TestCase):
         state = load_state(self.output_root / ".workflow-state.json")
         self.assertEqual(len(state.completed_steps), len(WORKFLOW_STEPS))
         self.assertIn("README", state.output_files)
+
+    def test_resume_after_partial_state(self):
+        first_step, second_step = self.make_steps()
+        first_output = self.output_root / first_step.output_path
+        first_output.parent.mkdir(parents=True, exist_ok=True)
+        first_output.write_text("# Existing First\n\nContent", encoding="utf-8")
+        state = create_initial_state(
+            "output",
+            self.input_path,
+            self.output_root,
+            next_step=second_step.step_id,
+        )
+        mark_step_completed(
+            state,
+            first_step.step_id,
+            first_output,
+            next_step=second_step.step_id,
+        )
+        save_state(state, self.output_root / ".workflow-state.json")
+        llm_client = RecordingLLMClient("# Generated Second\n\nContent")
+        runner = WorkflowRunner(
+            config={},
+            workflow_steps=self.make_steps(),
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=llm_client,
+        )
+
+        result = runner.run(self.input_path, self.output_root, resume=True)
+
+        self.assertEqual(result.completed_step_ids, [second_step.step_id])
+        self.assertEqual(len(llm_client.prompts), 1)
+        self.assertTrue((self.output_root / second_step.output_path).is_file())
+
+    def test_skip_existing_valid_outputs_by_default(self):
+        first_step = self.make_steps()[0]
+        existing_output = self.output_root / first_step.output_path
+        existing_output.parent.mkdir(parents=True, exist_ok=True)
+        existing_output.write_text("# Existing\n\nContent", encoding="utf-8")
+        llm_client = RecordingLLMClient("# New\n\nContent")
+        runner = WorkflowRunner(
+            config={"output": {"overwrite": False}},
+            workflow_steps=[first_step],
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=llm_client,
+        )
+
+        result = runner.run(self.input_path, self.output_root)
+
+        self.assertEqual(result.skipped_step_ids, [first_step.step_id])
+        self.assertEqual(llm_client.prompts, [])
+        self.assertEqual(existing_output.read_text(encoding="utf-8"), "# Existing\n\nContent")
+
+    def test_overwrite_regenerates_existing_outputs(self):
+        first_step = self.make_steps()[0]
+        existing_output = self.output_root / first_step.output_path
+        existing_output.parent.mkdir(parents=True, exist_ok=True)
+        existing_output.write_text("# Existing\n\nContent", encoding="utf-8")
+        llm_client = RecordingLLMClient("# New\n\nContent")
+        runner = WorkflowRunner(
+            config={"output": {"overwrite": True}},
+            workflow_steps=[first_step],
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=llm_client,
+        )
+
+        result = runner.run(self.input_path, self.output_root)
+
+        self.assertEqual(result.skipped_step_ids, [])
+        self.assertEqual(len(llm_client.prompts), 1)
+        self.assertEqual(existing_output.read_text(encoding="utf-8"), "# New\n\nContent\n")
+
+    def test_step_mode_runs_only_selected_step_and_requires_dependencies(self):
+        first_step, second_step = self.make_steps()
+        first_output = self.output_root / first_step.output_path
+        first_output.parent.mkdir(parents=True, exist_ok=True)
+        first_output.write_text("# Existing First\n\nContent", encoding="utf-8")
+        llm_client = RecordingLLMClient("# Generated Second\n\nContent")
+        runner = WorkflowRunner(
+            config={},
+            workflow_steps=self.make_steps(),
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=llm_client,
+        )
+
+        result = runner.run(
+            self.input_path,
+            self.output_root,
+            step_id=second_step.step_id,
+        )
+
+        self.assertEqual(result.completed_step_ids, [second_step.step_id])
+        self.assertEqual(len(llm_client.prompts), 1)
+        self.assertTrue((self.output_root / second_step.output_path).is_file())
+
+    def test_step_mode_missing_dependencies_fails(self):
+        second_step = self.make_steps()[1]
+        runner = WorkflowRunner(
+            config={},
+            workflow_steps=self.make_steps(),
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=RecordingLLMClient(),
+        )
+
+        with self.assertRaises(WorkflowRunError) as error:
+            runner.run(self.input_path, self.output_root, step_id=second_step.step_id)
+
+        self.assertIn("Missing completed dependencies", str(error.exception))
+
+    def test_from_step_runs_selected_and_downstream_steps(self):
+        first_step = self.make_steps()[0]
+        first_output = self.output_root / first_step.output_path
+        first_output.parent.mkdir(parents=True, exist_ok=True)
+        first_output.write_text("# Existing First\n\nContent", encoding="utf-8")
+        llm_client = SequencedLLMClient()
+        runner = WorkflowRunner(
+            config={"output": {"overwrite": True}},
+            workflow_steps=self.make_steps(),
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=llm_client,
+        )
+
+        result = runner.run(
+            self.input_path,
+            self.output_root,
+            from_step_id=first_step.step_id,
+        )
+
+        self.assertEqual(result.completed_step_ids, ["00-first", "01-second"])
+        self.assertEqual(len(llm_client.prompts), 2)
+
+    def test_invalid_step_id_fails(self):
+        runner = WorkflowRunner(
+            config={},
+            workflow_steps=self.make_steps(),
+            llm_client=RecordingLLMClient(),
+        )
+
+        with self.assertRaises(WorkflowRunError) as error:
+            runner.run(self.input_path, self.output_root, step_id="missing-step")
+
+        self.assertIn("Unknown workflow step ID", str(error.exception))
 
 
 if __name__ == "__main__":
