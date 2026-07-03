@@ -113,6 +113,10 @@ def main() -> None:
 
     config = load_config(args.config)
     config.setdefault("output", {})["overwrite"] = args.overwrite
+    if args.review:
+        config.setdefault("workflow", {})["default_review"] = True
+    if args.no_review:
+        config.setdefault("workflow", {})["default_review"] = False
     try:
         llm_client = create_llm_client(args, config)
     except LLMClientError as error:
@@ -131,6 +135,7 @@ def main() -> None:
             resume=args.resume,
             step_id=args.step,
             from_step_id=args.from_step,
+            review=None,
         )
     except WorkflowRunError as error:
         raise SystemExit(str(error)) from error

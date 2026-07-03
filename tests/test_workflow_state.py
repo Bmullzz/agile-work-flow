@@ -10,6 +10,8 @@ from scripts.workflow_state import (
     mark_step_completed,
     mark_step_failed,
     mark_step_started,
+    mark_step_skipped,
+    mark_workflow_quit,
     save_state,
     state_file_path,
 )
@@ -71,6 +73,25 @@ class WorkflowStateTests(unittest.TestCase):
 
         self.assertEqual(state.approved_steps, ["00-app-intake"])
         self.assertIsNone(state.pending_review_step)
+
+    def test_mark_step_skipped_tracks_output_without_completed_step(self):
+        state = create_initial_state("test-project", "input.md", "output")
+
+        mark_step_skipped(state, "00-app-intake", "output/00.md", next_step="01-next")
+
+        self.assertEqual(state.completed_steps, [])
+        self.assertEqual(state.output_files["00-app-intake"], "output/00.md")
+        self.assertEqual(state.next_step, "01-next")
+
+    def test_mark_workflow_quit_pauses_state(self):
+        state = create_initial_state("test-project", "input.md", "output")
+
+        mark_workflow_quit(state, "00-app-intake")
+
+        self.assertEqual(state.workflow_status, "paused")
+        self.assertEqual(state.current_step, "00-app-intake")
+        self.assertEqual(state.next_step, "00-app-intake")
+        self.assertEqual(state.pending_review_step, "00-app-intake")
 
     def test_load_existing_state(self):
         state = create_initial_state("test-project", "input.md", "output")

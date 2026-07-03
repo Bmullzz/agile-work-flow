@@ -92,6 +92,44 @@ def validate_generated_markdown(content: str) -> dict[str, Any]:
     return _result(path=None, is_valid=not errors, errors=errors, warnings=warnings)
 
 
+def validate_markdown_file(path: PathValue) -> dict[str, Any]:
+    try:
+        file_path = _as_path(path)
+    except ValueError as error:
+        return _result(path=path, is_valid=False, errors=[str(error)], warnings=[])
+
+    if not file_path.exists():
+        return _result(
+            file_path,
+            False,
+            [f"Markdown file does not exist: {file_path}"],
+            [],
+        )
+    if not file_path.is_file():
+        return _result(
+            file_path,
+            False,
+            [f"Markdown path is not a file: {file_path}"],
+            [],
+        )
+    if file_path.suffix.lower() != ".md":
+        return _result(
+            file_path,
+            False,
+            [f"Markdown file must use a .md extension: {file_path}"],
+            [],
+        )
+
+    try:
+        content = file_path.read_text(encoding="utf-8")
+    except OSError as error:
+        return _result(file_path, False, [f"Markdown file could not be read: {error}"], [])
+
+    result = validate_generated_markdown(content)
+    result["path"] = str(file_path)
+    return result
+
+
 def _result(
     path: Any, is_valid: bool, errors: list[str], warnings: list[str]
 ) -> dict[str, Any]:

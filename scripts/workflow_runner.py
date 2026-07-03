@@ -12,6 +12,7 @@ from scripts.llm_client import LLMClient
 from scripts.markdown_writer import write_markdown
 from scripts.models import WorkflowStep
 from scripts.prompt_loader import render_prompt_file
+from scripts.review_gate import ReviewDecision, ReviewGate
 from scripts.validators import validate_generated_markdown, validate_input_file
 from scripts.workflow_state import (
     WorkflowState,
@@ -20,7 +21,10 @@ from scripts.workflow_state import (
     load_state,
     mark_step_completed,
     mark_step_failed,
+    mark_step_approved,
+    mark_step_skipped,
     mark_step_started,
+    mark_workflow_quit,
     save_state,
     state_file_path,
 )
@@ -49,6 +53,7 @@ class WorkflowRunResult:
     index_paths: dict[str, Path] = field(default_factory=dict)
     index_warnings: list[str] = field(default_factory=list)
     state_path: Optional[Path] = None
+    quit_requested: bool = False
 
 
 class WorkflowRunner:
@@ -63,6 +68,7 @@ class WorkflowRunner:
         input_validator: InputValidator = validate_input_file,
         output_validator: OutputValidator = validate_generated_markdown,
         index_writer: IndexWriter | None = None,
+        review_gate: ReviewGate | None = None,
     ) -> None:
         if llm_client is None:
             raise ValueError("llm_client is required.")
@@ -76,6 +82,7 @@ class WorkflowRunner:
         self.input_validator = input_validator
         self.output_validator = output_validator
         self.index_writer = index_writer or IndexWriter()
+        self.review_gate = review_gate or ReviewGate()
 
     def run(
         self,
@@ -84,6 +91,7 @@ class WorkflowRunner:
         resume: bool = False,
         step_id: str | None = None,
         from_step_id: str | None = None,
+        review: bool | None = None,
     ) -> WorkflowRunResult:
         input_file = Path(input_path)
         output_directory = Path(output_root)
@@ -102,6 +110,7 @@ class WorkflowRunner:
             )
 
         overwrite = bool(self.config.get("output", {}).get("overwrite", False))
+        review_enabled = self._review_enabled(review)
         state = self._load_or_create_state(input_file, output_directory, state_path)
         self._save_state_safely(state, state_path)
         steps_to_run = self._select_steps(
@@ -121,7 +130,12 @@ class WorkflowRunner:
         for index, step in enumerate(steps_to_run):
             print(f"[{step.step_id}] Starting {step.name}")
             try:
-                self._check_dependencies(step, completed_step_ids)
+                self._check_dependencies(
+                    step,
+                    completed_step_ids,
+                    state=state,
+                    review_enabled=review_enabled,
+                )
                 mark_step_started(
                     state,
                     step.step_id,
@@ -133,30 +147,25 @@ class WorkflowRunner:
                     not overwrite
                     and self._is_existing_output_valid(step, output_directory)
                 ):
-                    completed_steps.append(step)
-                    completed_step_ids.add(step.step_id)
-                    result.completed_step_ids.append(step.step_id)
                     result.skipped_step_ids.append(step.step_id)
-                    result.output_paths[step.step_id] = existing_output
-                    mark_step_completed(
+                    self._record_step_success(
                         state,
-                        step.step_id,
+                        result,
+                        completed_steps,
+                        completed_step_ids,
+                        step,
                         existing_output,
-                        next_step=self._next_step_id(steps_to_run, index),
+                        self._next_step_id(steps_to_run, index),
+                        skipped=True,
                     )
                     self._save_state_safely(state, state_path)
                     print(f"[{step.step_id}] Skipped existing valid output")
                     continue
-                context = self.context_builder(
-                    step, input_file, output_directory, completed_steps
-                )
-                prompt = self.prompt_loader(step.prompt_template_path, context)
-                generated_markdown = self.llm_client.generate(prompt)
-                self._validate_generated_markdown(step, generated_markdown)
-                output_path = self.markdown_writer(
+                output_path = self._generate_step_output(
+                    step,
+                    input_file,
                     output_directory,
-                    step.output_path,
-                    generated_markdown,
+                    completed_steps,
                     overwrite,
                 )
             except Exception as error:
@@ -170,20 +179,50 @@ class WorkflowRunner:
                 print(message)
                 continue
 
-            completed_steps.append(step)
-            completed_step_ids.add(step.step_id)
-            result.completed_step_ids.append(step.step_id)
-            result.output_paths[step.step_id] = output_path
-            mark_step_completed(
+            try:
+                review_outcome = self._review_step_if_needed(
+                    review_enabled,
+                    step,
+                    output_path,
+                    input_file,
+                    output_directory,
+                    completed_steps,
+                    overwrite,
+                    state,
+                    state_path,
+                )
+            except Exception as error:
+                message = f"Step {step.step_id} failed: {error}"
+                mark_step_failed(state, step.step_id)
+                self._save_state_safely(state, state_path)
+                if self._stop_on_failure():
+                    self._fail(result, step.step_id, message)
+                result.failed_step_id = step.step_id
+                result.errors.append(message)
+                print(message)
+                continue
+
+            if review_outcome == ReviewDecision.QUIT:
+                mark_workflow_quit(state, step.step_id)
+                self._save_state_safely(state, state_path)
+                result.quit_requested = True
+                print(f"[{step.step_id}] Review requested quit.")
+                return result
+
+            self._record_step_success(
                 state,
-                step.step_id,
+                result,
+                completed_steps,
+                completed_step_ids,
+                step,
                 output_path,
-                next_step=self._next_step_id(steps_to_run, index),
+                self._next_step_id(steps_to_run, index),
+                skipped=review_outcome == ReviewDecision.SKIP,
             )
             self._save_state_safely(state, state_path)
             print(f"[{step.step_id}] Wrote {output_path}")
 
-        if result.failed_step_id is None:
+        if result.failed_step_id is None and not result.quit_requested:
             try:
                 index_result = self.index_writer.write_indexes(
                     output_directory,
@@ -218,7 +257,11 @@ class WorkflowRunner:
         return result
 
     def _check_dependencies(
-        self, step: WorkflowStep, completed_step_ids: set[str]
+        self,
+        step: WorkflowStep,
+        completed_step_ids: set[str],
+        state: WorkflowState | None = None,
+        review_enabled: bool = False,
     ) -> None:
         missing = [
             step_id
@@ -230,6 +273,17 @@ class WorkflowRunner:
                 f"Missing completed dependencies for {step.step_id}: "
                 + ", ".join(missing)
             )
+        if review_enabled and state is not None:
+            unapproved = [
+                step_id
+                for step_id in step.depends_on_step_ids
+                if step_id not in state.approved_steps
+            ]
+            if unapproved:
+                raise WorkflowRunError(
+                    f"Unapproved dependencies for {step.step_id}: "
+                    + ", ".join(unapproved)
+                )
 
     def _select_steps(
         self,
@@ -308,8 +362,96 @@ class WorkflowRunner:
                 + "; ".join(validation["errors"])
             )
 
+    def _generate_step_output(
+        self,
+        step: WorkflowStep,
+        input_file: Path,
+        output_directory: Path,
+        completed_steps: list[WorkflowStep],
+        overwrite: bool,
+    ) -> Path:
+        context = self.context_builder(
+            step, input_file, output_directory, completed_steps
+        )
+        prompt = self.prompt_loader(step.prompt_template_path, context)
+        generated_markdown = self.llm_client.generate(prompt)
+        self._validate_generated_markdown(step, generated_markdown)
+        return self.markdown_writer(
+            output_directory,
+            step.output_path,
+            generated_markdown,
+            overwrite,
+        )
+
+    def _review_step_if_needed(
+        self,
+        review_enabled: bool,
+        step: WorkflowStep,
+        output_path: Path,
+        input_file: Path,
+        output_directory: Path,
+        completed_steps: list[WorkflowStep],
+        overwrite: bool,
+        state: WorkflowState,
+        state_path: Path,
+    ) -> ReviewDecision | None:
+        if not review_enabled:
+            return None
+
+        state.pending_review_step = step.step_id
+        self._save_state_safely(state, state_path)
+
+        while True:
+            decision = self.review_gate.review(step, output_path)
+            if decision == ReviewDecision.REGENERATE:
+                output_path = self._generate_step_output(
+                    step,
+                    input_file,
+                    output_directory,
+                    completed_steps,
+                    overwrite=True,
+                )
+                continue
+            if decision in {ReviewDecision.APPROVE, ReviewDecision.EDIT}:
+                mark_step_approved(state, step.step_id)
+                self._save_state_safely(state, state_path)
+                return decision
+            if decision == ReviewDecision.SKIP:
+                mark_step_approved(state, step.step_id)
+                self._save_state_safely(state, state_path)
+                return decision
+            if decision == ReviewDecision.QUIT:
+                return decision
+
+    def _record_step_success(
+        self,
+        state: WorkflowState,
+        result: WorkflowRunResult,
+        completed_steps: list[WorkflowStep],
+        completed_step_ids: set[str],
+        step: WorkflowStep,
+        output_path: Path,
+        next_step_id: str | None,
+        skipped: bool = False,
+    ) -> None:
+        completed_steps.append(step)
+        completed_step_ids.add(step.step_id)
+        result.completed_step_ids.append(step.step_id)
+        result.output_paths[step.step_id] = output_path
+        if skipped:
+            if step.step_id not in result.skipped_step_ids:
+                result.skipped_step_ids.append(step.step_id)
+            mark_step_skipped(state, step.step_id, output_path, next_step=next_step_id)
+        else:
+            mark_step_completed(state, step.step_id, output_path, next_step=next_step_id)
+
     def _stop_on_failure(self) -> bool:
         return bool(self.config.get("workflow", {}).get("stop_on_failure", True))
+
+    def _review_enabled(self, override: bool | None) -> bool:
+        if override is not None:
+            return override
+        return bool(self.config.get("workflow", {}).get("default_review", False))
 
     def _load_or_create_state(
         self, input_file: Path, output_directory: Path, path: Path

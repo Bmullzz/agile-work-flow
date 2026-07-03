@@ -93,10 +93,32 @@ def mark_step_completed(
     return state
 
 
+def mark_step_skipped(
+    state: WorkflowState,
+    step_id: str,
+    output_file: str | Path,
+    next_step: str | None = None,
+) -> WorkflowState:
+    state.output_files[step_id] = str(output_file)
+    state.current_step = None
+    state.next_step = next_step
+    state.failed_step = None
+    state.workflow_status = "completed" if next_step is None else "running"
+    return state
+
+
 def mark_step_failed(state: WorkflowState, step_id: str) -> WorkflowState:
     state.workflow_status = "failed"
     state.failed_step = step_id
     state.current_step = step_id
+    return state
+
+
+def mark_workflow_quit(state: WorkflowState, step_id: str) -> WorkflowState:
+    state.workflow_status = "paused"
+    state.current_step = step_id
+    state.next_step = step_id
+    state.pending_review_step = step_id
     return state
 
 

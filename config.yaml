@@ -7,7 +7,7 @@ llm:
   timeout_seconds: 60
 
 workflow:
-  default_review: true
+  default_review: false
   resume_enabled: true
   stop_on_failure: true
   steps:

@@ -22,7 +22,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "timeout_seconds": 60,
     },
     "workflow": {
-        "default_review": True,
+        "default_review": False,
         "resume_enabled": True,
         "stop_on_failure": True,
         "steps": [],

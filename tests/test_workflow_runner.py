@@ -4,6 +4,7 @@ from pathlib import Path
 
 from scripts.llm_client import FakeLLMClient
 from scripts.models import WorkflowStep
+from scripts.review_gate import ReviewDecision
 from scripts.workflow_runner import WorkflowRunError, WorkflowRunner
 from scripts.workflow_state import (
     create_initial_state,
@@ -33,6 +34,23 @@ class SequencedLLMClient:
         self.prompts.append(prompt)
         self.count += 1
         return f"# Generated {self.count}\n\nContent"
+
+
+class ScriptedReviewGate:
+    def __init__(self, decisions):
+        self.decisions = list(decisions)
+        self.calls = []
+
+    def review(self, step, output_path):
+        self.calls.append((step.step_id, output_path))
+        if not self.decisions:
+            raise AssertionError("No scripted review decisions remaining")
+        return self.decisions.pop(0)
+
+
+class FailingReviewGate:
+    def review(self, step, output_path):
+        raise AssertionError("Review gate should not be called")
 
 
 class WorkflowRunnerTests(unittest.TestCase):
@@ -337,6 +355,134 @@ class WorkflowRunnerTests(unittest.TestCase):
             runner.run(self.input_path, self.output_root, step_id="missing-step")
 
         self.assertIn("Unknown workflow step ID", str(error.exception))
+
+    def test_full_auto_mode_bypasses_review_gate(self):
+        first_step = self.make_steps()[0]
+        runner = WorkflowRunner(
+            config={"workflow": {"default_review": False}},
+            workflow_steps=[first_step],
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=RecordingLLMClient(),
+            review_gate=FailingReviewGate(),
+        )
+
+        result = runner.run(self.input_path, self.output_root)
+
+        self.assertEqual(result.completed_step_ids, [first_step.step_id])
+
+    def test_review_approve_marks_step_approved(self):
+        first_step = self.make_steps()[0]
+        review_gate = ScriptedReviewGate([ReviewDecision.APPROVE])
+        runner = WorkflowRunner(
+            config={"workflow": {"default_review": True}},
+            workflow_steps=[first_step],
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=RecordingLLMClient(),
+            review_gate=review_gate,
+        )
+
+        runner.run(self.input_path, self.output_root)
+
+        state = load_state(self.output_root / ".workflow-state.json")
+        self.assertEqual(state.approved_steps, [first_step.step_id])
+        self.assertEqual(len(review_gate.calls), 1)
+
+    def test_review_regenerate_reruns_current_step(self):
+        first_step = self.make_steps()[0]
+        review_gate = ScriptedReviewGate(
+            [ReviewDecision.REGENERATE, ReviewDecision.APPROVE]
+        )
+        llm_client = SequencedLLMClient()
+        runner = WorkflowRunner(
+            config={"workflow": {"default_review": True}, "output": {"overwrite": True}},
+            workflow_steps=[first_step],
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=llm_client,
+            review_gate=review_gate,
+        )
+
+        result = runner.run(self.input_path, self.output_root)
+
+        self.assertEqual(len(llm_client.prompts), 2)
+        self.assertEqual(
+            result.output_paths[first_step.step_id].read_text(encoding="utf-8"),
+            "# Generated 2\n\nContent\n",
+        )
+
+    def test_review_quit_saves_paused_state(self):
+        first_step = self.make_steps()[0]
+        review_gate = ScriptedReviewGate([ReviewDecision.QUIT])
+        runner = WorkflowRunner(
+            config={"workflow": {"default_review": True}},
+            workflow_steps=[first_step],
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=RecordingLLMClient(),
+            review_gate=review_gate,
+        )
+
+        result = runner.run(self.input_path, self.output_root)
+
+        state = load_state(self.output_root / ".workflow-state.json")
+        self.assertTrue(result.quit_requested)
+        self.assertEqual(state.workflow_status, "paused")
+        self.assertEqual(state.pending_review_step, first_step.step_id)
+        self.assertFalse((self.output_root / "README.md").exists())
+
+    def test_review_mode_blocks_downstream_until_dependency_approved(self):
+        first_step, second_step = self.make_steps()
+        first_output = self.output_root / first_step.output_path
+        first_output.parent.mkdir(parents=True, exist_ok=True)
+        first_output.write_text("# Existing First\n\nContent", encoding="utf-8")
+        state = create_initial_state(
+            "output",
+            self.input_path,
+            self.output_root,
+            next_step=second_step.step_id,
+        )
+        mark_step_completed(
+            state,
+            first_step.step_id,
+            first_output,
+            next_step=second_step.step_id,
+        )
+        save_state(state, self.output_root / ".workflow-state.json")
+        runner = WorkflowRunner(
+            config={"workflow": {"default_review": True}},
+            workflow_steps=self.make_steps(),
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=RecordingLLMClient(),
+            review_gate=ScriptedReviewGate([ReviewDecision.APPROVE]),
+        )
+
+        with self.assertRaises(WorkflowRunError) as error:
+            runner.run(self.input_path, self.output_root, step_id=second_step.step_id)
+
+        self.assertIn("Unapproved dependencies", str(error.exception))
+
+    def test_review_skip_marks_step_approved_for_downstream_use(self):
+        first_step = self.make_steps()[0]
+        existing_output = self.output_root / first_step.output_path
+        existing_output.parent.mkdir(parents=True, exist_ok=True)
+        existing_output.write_text("# Existing\n\nContent", encoding="utf-8")
+        review_gate = ScriptedReviewGate([ReviewDecision.SKIP])
+        runner = WorkflowRunner(
+            config={"workflow": {"default_review": True}, "output": {"overwrite": True}},
+            workflow_steps=[first_step],
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=RecordingLLMClient(),
+            review_gate=review_gate,
+        )
+
+        runner.run(self.input_path, self.output_root)
+
+        state = load_state(self.output_root / ".workflow-state.json")
+        self.assertIn(first_step.step_id, state.approved_steps)
 
 
 if __name__ == "__main__":
