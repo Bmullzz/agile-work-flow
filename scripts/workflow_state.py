@@ -146,6 +146,12 @@ def mark_downstream_steps_stale(
         if stale_step_id in state.approved_steps:
             state.approved_steps.remove(stale_step_id)
     if downstream_step_ids:
+        workflow_order = {step.step_id: step.step_number for step in workflow_steps}
+        state.stale_steps.sort(
+            key=lambda stale_step_id: workflow_order.get(
+                stale_step_id, len(workflow_order)
+            )
+        )
         state.next_step = state.stale_steps[0]
     return newly_stale_step_ids
 
