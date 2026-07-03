@@ -34,7 +34,7 @@ def write_markdown(
             f"Markdown output path must use a .md extension: {output_path}"
         )
 
-    final_path = root_path / output_path
+    final_path = _safe_output_path(root_path, output_path)
     normalized_content = _normalize_trailing_whitespace(content)
     return write_text_file(final_path, normalized_content, overwrite=overwrite)
 
@@ -42,6 +42,21 @@ def write_markdown(
 def _normalize_trailing_whitespace(content: str) -> str:
     lines = [line.rstrip() for line in content.strip().splitlines()]
     return "\n".join(lines) + "\n"
+
+
+def _safe_output_path(root_path: Path, output_path: Path) -> Path:
+    resolved_root = root_path.resolve(strict=False)
+    candidate_path = root_path / output_path
+    resolved_output = candidate_path.resolve(strict=False)
+
+    try:
+        resolved_output.relative_to(resolved_root)
+    except ValueError as error:
+        raise MarkdownWriteError(
+            f"Markdown output path must stay inside output_root: {output_path}"
+        ) from error
+
+    return candidate_path
 
 
 def _as_path(path: PathValue, field_name: str) -> Path:

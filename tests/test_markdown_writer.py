@@ -73,6 +73,13 @@ class MarkdownWriterTests(unittest.TestCase):
 
         self.assertIn(".md extension", str(error.exception))
 
+    def test_rejects_parent_directory_traversal(self):
+        with self.assertRaises(MarkdownWriteError) as error:
+            write_markdown(self.output_root, "../escape.md", "# Escape")
+
+        self.assertIn("must stay inside output_root", str(error.exception))
+        self.assertFalse((self.output_root.parent / "escape.md").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
