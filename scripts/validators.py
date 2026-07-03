@@ -87,7 +87,7 @@ def validate_markdown_content(
         errors.append("Generated Markdown is empty.")
         return _result(path=None, is_valid=False, errors=errors, warnings=warnings)
 
-    stripped = content.lstrip()
+    stripped = _strip_yaml_frontmatter(content).lstrip()
     if not stripped.startswith("#"):
         errors.append("Generated Markdown must start with a heading.")
 
@@ -206,7 +206,7 @@ def _is_meaningful_app_idea(text: str) -> bool:
 
 
 def _missing_sections(content: str, required_sections: list[str]) -> list[str]:
-    headings = _extract_headings(content)
+    headings = _extract_headings(_strip_yaml_frontmatter(content))
     missing = []
     for section in required_sections:
         if not any(_heading_matches(heading, section) for heading in headings):
@@ -225,6 +225,15 @@ def _extract_headings(content: str) -> list[str]:
 
 def _strip_code_fences(content: str) -> str:
     return re.sub(r"```.*?```", " ", content, flags=re.DOTALL)
+
+
+def _strip_yaml_frontmatter(content: str) -> str:
+    if not content.startswith("---"):
+        return content
+    match = re.match(r"^---\s*\n.*?\n---\s*\n?", content, flags=re.DOTALL)
+    if not match:
+        return content
+    return content[match.end() :]
 
 
 def _heading_matches(heading: str, expected: str) -> bool:

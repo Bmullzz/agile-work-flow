@@ -167,8 +167,12 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(context_calls, ["00-first"])
         self.assertEqual(llm_client.prompts, ["# Rendered Prompt"])
         self.assertTrue(result.output_paths["00-first"].exists())
-        self.assertEqual(
+        self.assertIn(
+            'document_id: "00-first"',
             result.output_paths["00-first"].read_text(encoding="utf-8"),
+        )
+        self.assertEqual(
+            self._markdown_body(result.output_paths["00-first"]),
             "# Generated\n\nOutput\n",
         )
         self.assertTrue((self.output_root / "README.md").is_file())
@@ -355,7 +359,7 @@ class WorkflowRunnerTests(unittest.TestCase):
 
         self.assertEqual(result.skipped_step_ids, [])
         self.assertEqual(len(llm_client.prompts), 1)
-        self.assertEqual(existing_output.read_text(encoding="utf-8"), "# New\n\nContent\n")
+        self.assertEqual(self._markdown_body(existing_output), "# New\n\nContent\n")
 
     def test_step_mode_runs_only_selected_step_and_requires_dependencies(self):
         first_step, second_step = self.make_steps()
@@ -483,7 +487,7 @@ class WorkflowRunnerTests(unittest.TestCase):
 
         self.assertEqual(len(llm_client.prompts), 2)
         self.assertEqual(
-            result.output_paths[first_step.step_id].read_text(encoding="utf-8"),
+            self._markdown_body(result.output_paths[first_step.step_id]),
             "# Generated 2\n\nContent\n",
         )
 
@@ -667,7 +671,7 @@ class WorkflowRunnerTests(unittest.TestCase):
         state = load_state(self.output_root / ".workflow-state.json")
         self.assertEqual(state.stale_steps, [])
         self.assertEqual(
-            first_output.read_text(encoding="utf-8"),
+            self._markdown_body(first_output),
             "# Regenerated\n\nContent\n",
         )
 
@@ -710,6 +714,13 @@ class WorkflowRunnerTests(unittest.TestCase):
             state.approved_steps.append(step.step_id)
         save_state(state, self.output_root / ".workflow-state.json")
         return state
+
+    def _markdown_body(self, path: Path) -> str:
+        content = path.read_text(encoding="utf-8")
+        if content.startswith("---\n"):
+            _, _, content = content.partition("\n---\n")
+            return content.lstrip()
+        return content
 
 
 if __name__ == "__main__":

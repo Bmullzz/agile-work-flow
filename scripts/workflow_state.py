@@ -11,6 +11,7 @@ from scripts.workflow_steps import get_downstream_step_ids
 
 
 STATE_FILE_NAME = ".workflow-state.json"
+META_STATE_FILE_NAME = "99-meta/state/workflow-state.json"
 
 
 class WorkflowStateError(RuntimeError):
@@ -57,12 +58,14 @@ def load_state(path: str | Path) -> WorkflowState:
 
 def save_state(state: WorkflowState, path: str | Path) -> Path:
     state_path = Path(path)
+    state_json = json.dumps(state.to_dict(), indent=2, sort_keys=True) + "\n"
     try:
         state_path.parent.mkdir(parents=True, exist_ok=True)
-        state_path.write_text(
-            json.dumps(state.to_dict(), indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        state_path.write_text(state_json, encoding="utf-8")
+        if state_path.name == STATE_FILE_NAME:
+            meta_state_path = state_path.parent / META_STATE_FILE_NAME
+            meta_state_path.parent.mkdir(parents=True, exist_ok=True)
+            meta_state_path.write_text(state_json, encoding="utf-8")
     except OSError as error:
         raise WorkflowStateError(f"Could not write workflow state: {state_path}") from error
     return state_path

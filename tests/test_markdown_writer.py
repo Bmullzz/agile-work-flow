@@ -34,6 +34,30 @@ class MarkdownWriterTests(unittest.TestCase):
             self.output_root / "01-product" / "01-product-vision.md",
         )
 
+    def test_write_markdown_adds_optional_frontmatter(self):
+        result = write_markdown(
+            self.output_root,
+            "01-product-vision.md",
+            "# Product Vision",
+            frontmatter={
+                "title": "Product Vision",
+                "document_id": "01-product-vision",
+                "document_type": "workflow_output",
+                "workflow_step": "01-product-vision",
+                "status": "generated",
+                "review_status": "pending",
+                "depends_on": ["00-app-intake"],
+                "blocks": [],
+                "tags": ["ai-agile/product"],
+            },
+        )
+
+        content = result.read_text(encoding="utf-8")
+        self.assertTrue(content.startswith("---\n"))
+        self.assertIn('title: "Product Vision"', content)
+        self.assertIn('depends_on: ["00-app-intake"]', content)
+        self.assertIn("\n---\n\n# Product Vision\n", content)
+
     def test_rejects_empty_content(self):
         with self.assertRaises(MarkdownWriteError) as error:
             write_markdown(self.output_root, "empty.md", "   ")

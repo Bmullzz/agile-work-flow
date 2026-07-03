@@ -39,6 +39,22 @@ class WorkflowStateTests(unittest.TestCase):
         self.assertEqual(path, self.state_path)
         self.assertTrue(self.state_path.is_file())
 
+    def test_save_state_writes_obsidian_visible_state_copy(self):
+        state = create_initial_state(
+            "test-project",
+            "input/app-idea.md",
+            "output/test-project",
+        )
+
+        save_state(state, self.state_path)
+
+        meta_state_path = self.root / "99-meta" / "state" / "workflow-state.json"
+        self.assertTrue(meta_state_path.is_file())
+        self.assertEqual(
+            load_state(self.state_path).to_dict(),
+            load_state(meta_state_path).to_dict(),
+        )
+
     def test_update_completed_steps(self):
         state = create_initial_state("test-project", "input.md", "output")
 

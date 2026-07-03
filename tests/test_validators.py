@@ -121,6 +121,19 @@ Create a command line planning assistant that reads an app concept and writes us
         self.assertTrue(result["is_valid"])
         self.assertEqual(result["errors"], [])
 
+    def test_valid_markdown_content_allows_yaml_frontmatter(self):
+        result = validate_markdown_content(
+            "---\n"
+            'title: "Product Vision"\n'
+            'tags: ["ai-agile/product"]\n'
+            "---\n\n"
+            "# Product Vision\n\n## Overview\n\nBuild a local workflow planner.",
+            required_sections=["Overview"],
+        )
+
+        self.assertTrue(result["is_valid"])
+        self.assertEqual(result["errors"], [])
+
     def test_empty_markdown_content_fails(self):
         result = validate_markdown_content("")
 

@@ -15,6 +15,12 @@ from scripts.models import WorkflowStep
 class IndexWriteResult:
     readme_path: Path
     project_context_path: Path
+    assumptions_path: Path | None = None
+    open_questions_path: Path | None = None
+    workflow_state_path: Path | None = None
+    generation_summary_path: Path | None = None
+    validation_report_path: Path | None = None
+    changelog_path: Path | None = None
     warnings: list[str] = field(default_factory=list)
 
 
@@ -48,12 +54,96 @@ class IndexWriter:
                 "README.md",
                 self._render_readme(existing_steps, metadata, warnings),
                 overwrite=True,
+                frontmatter=_frontmatter(
+                    "AI Agile Workflow Output",
+                    "README",
+                    "index",
+                    tags=["ai-agile/index"],
+                ),
             )
             project_context_path = write_markdown(
                 output_directory,
                 "project-context.md",
                 self._render_project_context(existing_steps, metadata, warnings),
                 overwrite=True,
+                frontmatter=_frontmatter(
+                    "Project Context",
+                    "project-context",
+                    "context",
+                    tags=["ai-agile/context", "ai-agile/index"],
+                ),
+            )
+            assumptions_path = write_markdown(
+                output_directory,
+                "assumptions.md",
+                self._render_assumptions(existing_steps),
+                overwrite=True,
+                frontmatter=_frontmatter(
+                    "Assumptions",
+                    "assumptions",
+                    "metadata",
+                    tags=["ai-agile/meta", "ai-agile/assumptions"],
+                ),
+            )
+            open_questions_path = write_markdown(
+                output_directory,
+                "open-questions.md",
+                self._render_open_questions(existing_steps),
+                overwrite=True,
+                frontmatter=_frontmatter(
+                    "Open Questions",
+                    "open-questions",
+                    "metadata",
+                    tags=["ai-agile/meta", "ai-agile/questions"],
+                ),
+            )
+            workflow_state_path = write_markdown(
+                output_directory,
+                "workflow-state.md",
+                self._render_workflow_state(metadata),
+                overwrite=True,
+                frontmatter=_frontmatter(
+                    "Workflow State",
+                    "workflow-state",
+                    "metadata",
+                    tags=["ai-agile/meta", "ai-agile/state"],
+                ),
+            )
+            generation_summary_path = write_markdown(
+                output_directory,
+                "99-meta/generation-summary.md",
+                self._render_generation_summary(existing_steps, metadata, warnings),
+                overwrite=True,
+                frontmatter=_frontmatter(
+                    "Generation Summary",
+                    "99-meta/generation-summary",
+                    "metadata",
+                    tags=["ai-agile/meta", "ai-agile/summary"],
+                ),
+            )
+            validation_report_path = write_markdown(
+                output_directory,
+                "99-meta/validation-report.md",
+                self._render_validation_report(steps, existing_steps, warnings),
+                overwrite=True,
+                frontmatter=_frontmatter(
+                    "Validation Report",
+                    "99-meta/validation-report",
+                    "metadata",
+                    tags=["ai-agile/meta", "ai-agile/validation"],
+                ),
+            )
+            changelog_path = write_markdown(
+                output_directory,
+                "99-meta/changelog.md",
+                self._render_changelog(metadata),
+                overwrite=True,
+                frontmatter=_frontmatter(
+                    "Changelog",
+                    "99-meta/changelog",
+                    "metadata",
+                    tags=["ai-agile/meta", "ai-agile/changelog"],
+                ),
             )
         except Exception as error:
             raise IndexWriteError(f"Failed to write output indexes: {error}") from error
@@ -61,6 +151,12 @@ class IndexWriter:
         return IndexWriteResult(
             readme_path=readme_path,
             project_context_path=project_context_path,
+            assumptions_path=assumptions_path,
+            open_questions_path=open_questions_path,
+            workflow_state_path=workflow_state_path,
+            generation_summary_path=generation_summary_path,
+            validation_report_path=validation_report_path,
+            changelog_path=changelog_path,
             warnings=warnings,
         )
 
@@ -105,6 +201,20 @@ class IndexWriter:
             lines.append(f"- [{step.name}]({_markdown_link(step.output_path)})")
         lines.append("")
 
+        lines.extend(
+            [
+                "## Vault Metadata",
+                "",
+                "- [Assumptions](assumptions.md) ([[assumptions|Obsidian]])",
+                "- [Open Questions](open-questions.md) ([[open-questions|Obsidian]])",
+                "- [Workflow State](workflow-state.md) ([[workflow-state|Obsidian]])",
+                "- [Generation Summary](99-meta/generation-summary.md)",
+                "- [Validation Report](99-meta/validation-report.md)",
+                "- [Changelog](99-meta/changelog.md)",
+                "",
+            ]
+        )
+
         if warnings:
             lines.extend(["## Warnings", ""])
             for warning in warnings:
@@ -137,6 +247,12 @@ class IndexWriter:
                 "",
                 "Start with the roadmap, then follow dependency order through the coding-agent prompts.",
                 "",
+                "## Vault Links",
+                "",
+                "- [[assumptions|Assumptions]]",
+                "- [[open-questions|Open Questions]]",
+                "- [[workflow-state|Workflow State]]",
+                "",
             ]
         )
 
@@ -148,6 +264,123 @@ class IndexWriter:
 
         return "\n".join(lines)
 
+    def _render_assumptions(self, workflow_steps: list[WorkflowStep]) -> str:
+        lines = [
+            "# Assumptions",
+            "",
+            "Assumptions identified during generation or review should be collected here.",
+            "",
+            "## Sources",
+            "",
+        ]
+        for step in workflow_steps:
+            lines.append(f"- [{step.name}]({_markdown_link(step.output_path)})")
+        lines.extend(["", "## Assumptions Log", "", "- No assumptions have been recorded yet.", ""])
+        return "\n".join(lines)
+
+    def _render_open_questions(self, workflow_steps: list[WorkflowStep]) -> str:
+        lines = [
+            "# Open Questions",
+            "",
+            "Track unresolved product, technical, and delivery questions here.",
+            "",
+            "## Related Documents",
+            "",
+        ]
+        for step in workflow_steps:
+            lines.append(f"- [{step.name}]({_markdown_link(step.output_path)})")
+        lines.extend(["", "## Questions", "", "- No open questions have been recorded yet.", ""])
+        return "\n".join(lines)
+
+    def _render_workflow_state(self, metadata: dict[str, Any]) -> str:
+        state = metadata.get("workflow_state") or {}
+        lines = ["# Workflow State", ""]
+        if isinstance(state, dict) and state:
+            lines.extend(
+                [
+                    f"- Project: {state.get('project_name', 'unknown')}",
+                    f"- Status: {state.get('workflow_status', 'unknown')}",
+                    f"- Current step: {state.get('current_step') or 'none'}",
+                    f"- Next step: {state.get('next_step') or 'none'}",
+                    f"- Failed step: {state.get('failed_step') or 'none'}",
+                    "",
+                    "## Completed Steps",
+                    "",
+                ]
+            )
+            completed_steps = state.get("completed_steps") or []
+            if completed_steps:
+                for step_id in completed_steps:
+                    lines.append(f"- {step_id}")
+            else:
+                lines.append("- None")
+            lines.extend(["", "## Stale Steps", ""])
+            stale_steps = state.get("stale_steps") or []
+            if stale_steps:
+                for step_id in stale_steps:
+                    lines.append(f"- {step_id}")
+            else:
+                lines.append("- None")
+        else:
+            lines.append("Workflow state was not available when this file was generated.")
+        lines.append("")
+        return "\n".join(lines)
+
+    def _render_generation_summary(
+        self,
+        workflow_steps: list[WorkflowStep],
+        metadata: dict[str, Any],
+        warnings: list[str],
+    ) -> str:
+        lines = [
+            "# Generation Summary",
+            "",
+            f"- Generated documents: {len(workflow_steps)}",
+            f"- Warnings: {len(warnings)}",
+            "",
+        ]
+        lines.extend(_render_metadata(metadata))
+        lines.extend(["## Documents", ""])
+        for step in workflow_steps:
+            lines.append(f"- {step.step_id}: [{step.name}](../{_markdown_link(step.output_path)})")
+        lines.append("")
+        return "\n".join(lines)
+
+    def _render_validation_report(
+        self,
+        workflow_steps: list[WorkflowStep],
+        existing_steps: list[WorkflowStep],
+        warnings: list[str],
+    ) -> str:
+        existing_step_ids = {step.step_id for step in existing_steps}
+        lines = ["# Validation Report", "", "## Output Presence", ""]
+        for step in workflow_steps:
+            status = "present" if step.step_id in existing_step_ids else "missing"
+            lines.append(f"- {step.step_id}: {status}")
+        lines.extend(["", "## Required Sections", ""])
+        for step in workflow_steps:
+            required_sections = ", ".join(step.required_sections) or "none"
+            lines.append(f"- {step.step_id}: {required_sections}")
+        if warnings:
+            lines.extend(["", "## Warnings", ""])
+            for warning in warnings:
+                lines.append(f"- {warning}")
+        lines.append("")
+        return "\n".join(lines)
+
+    def _render_changelog(self, metadata: dict[str, Any]) -> str:
+        generated_at = metadata.get("generated_at") or datetime.now(timezone.utc).isoformat()
+        lines = [
+            "# Changelog",
+            "",
+            "## Initial Generation",
+            "",
+            f"- Generated workflow output package at {generated_at}.",
+            "- Created navigation and Obsidian-friendly metadata files.",
+            "",
+        ]
+        return "\n".join(lines)
+
 
 def _render_metadata(metadata: dict[str, Any]) -> list[str]:
     generated_at = metadata.get("generated_at") or datetime.now(timezone.utc).isoformat()
@@ -157,7 +390,7 @@ def _render_metadata(metadata: dict[str, Any]) -> list[str]:
         f"- Generated at: {generated_at}",
     ]
     for key in sorted(metadata):
-        if key == "generated_at":
+        if key in {"generated_at", "workflow_state"}:
             continue
         lines.append(f"- {key.replace('_', ' ').title()}: {metadata[key]}")
     lines.extend(["", ""])
@@ -173,3 +406,27 @@ def _find_step(workflow_steps: list[WorkflowStep], step_id: str) -> WorkflowStep
 
 def _markdown_link(path: Path) -> str:
     return path.as_posix()
+
+
+def _frontmatter(
+    title: str,
+    document_id: str,
+    document_type: str,
+    workflow_step: str = "index",
+    status: str = "generated",
+    review_status: str = "not_required",
+    depends_on: list[str] | None = None,
+    blocks: list[str] | None = None,
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "title": title,
+        "document_id": document_id,
+        "document_type": document_type,
+        "workflow_step": workflow_step,
+        "status": status,
+        "review_status": review_status,
+        "depends_on": depends_on or [],
+        "blocks": blocks or [],
+        "tags": tags or ["ai-agile"],
+    }

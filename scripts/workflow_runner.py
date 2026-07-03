@@ -37,7 +37,7 @@ PromptRenderer = Callable[[Path, dict[str, str]], str]
 ContextBuilder = Callable[
     [WorkflowStep, Path, Path, Iterable[WorkflowStep]], dict[str, str]
 ]
-MarkdownWriter = Callable[[Path, Path, str, bool], Path]
+MarkdownWriter = Callable[..., Path]
 InputValidator = Callable[[Path], dict[str, Any]]
 OutputValidator = Callable[[str, Optional[list[str]]], dict[str, Any]]
 
@@ -199,6 +199,7 @@ class WorkflowRunner:
                     output_directory,
                     completed_steps,
                     overwrite or step.step_id in state.stale_steps,
+                    review_enabled,
                 )
                 if was_approved_before_generation:
                     self._mark_downstream_stale(state, step)
@@ -279,6 +280,7 @@ class WorkflowRunner:
                     run_metadata={
                         "generated_at": "not recorded",
                         "completed_steps": len(result.completed_step_ids),
+                        "workflow_state": state.to_dict(),
                     },
                 )
             except Exception as error:
@@ -289,12 +291,17 @@ class WorkflowRunner:
             result.index_paths = {
                 "README": index_result.readme_path,
                 "PROJECT_CONTEXT": index_result.project_context_path,
+                "ASSUMPTIONS": index_result.assumptions_path,
+                "OPEN_QUESTIONS": index_result.open_questions_path,
+                "WORKFLOW_STATE": index_result.workflow_state_path,
+                "GENERATION_SUMMARY": index_result.generation_summary_path,
+                "VALIDATION_REPORT": index_result.validation_report_path,
+                "CHANGELOG": index_result.changelog_path,
             }
             result.index_warnings = list(index_result.warnings)
-            state.output_files["README"] = str(index_result.readme_path)
-            state.output_files["PROJECT_CONTEXT"] = str(
-                index_result.project_context_path
-            )
+            for output_key, output_path in result.index_paths.items():
+                if output_path is not None:
+                    state.output_files[output_key] = str(output_path)
             state.workflow_status = "stale" if state.stale_steps else "completed"
             state.current_step = None
             state.next_step = state.stale_steps[0] if state.stale_steps else None
@@ -443,6 +450,7 @@ class WorkflowRunner:
         output_directory: Path,
         completed_steps: list[WorkflowStep],
         overwrite: bool,
+        review_enabled: bool,
     ) -> Path:
         context = self.context_builder(
             step, input_file, output_directory, completed_steps
@@ -455,8 +463,27 @@ class WorkflowRunner:
             step.output_path,
             generated_markdown,
             overwrite,
+            frontmatter=self._frontmatter_for_step(step, review_enabled),
         )
         return output_path
+
+    def _frontmatter_for_step(
+        self, step: WorkflowStep, review_enabled: bool
+    ) -> dict[str, Any]:
+        return {
+            "title": step.name,
+            "document_id": step.step_id,
+            "document_type": "workflow_output",
+            "workflow_step": step.step_id,
+            "status": "generated",
+            "review_status": "pending" if review_enabled else "not_required",
+            "depends_on": list(step.depends_on_step_ids),
+            "blocks": list(step.blocks_step_ids),
+            "tags": [
+                "ai-agile/workflow-output",
+                f"ai-agile/{step.step_id}",
+            ],
+        }
 
     def _review_step_if_needed(
         self,
@@ -485,6 +512,7 @@ class WorkflowRunner:
                     output_directory,
                     completed_steps,
                     overwrite=True,
+                    review_enabled=review_enabled,
                 )
                 if step.step_id in state.approved_steps:
                     self._mark_downstream_stale(state, step)

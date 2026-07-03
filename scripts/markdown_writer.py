@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Union
+from typing import Any, Union
 
 from scripts.file_utils import write_text_file
 
@@ -20,6 +20,7 @@ def write_markdown(
     relative_path: PathValue,
     content: str,
     overwrite: bool = False,
+    frontmatter: dict[str, Any] | None = None,
 ) -> Path:
     if content is None or not content.strip():
         raise MarkdownWriteError("Markdown content cannot be empty.")
@@ -36,12 +37,37 @@ def write_markdown(
 
     final_path = _safe_output_path(root_path, output_path)
     normalized_content = _normalize_trailing_whitespace(content)
+    if frontmatter:
+        normalized_content = _add_frontmatter(normalized_content, frontmatter)
     return write_text_file(final_path, normalized_content, overwrite=overwrite)
 
 
 def _normalize_trailing_whitespace(content: str) -> str:
     lines = [line.rstrip() for line in content.strip().splitlines()]
     return "\n".join(lines) + "\n"
+
+
+def _add_frontmatter(content: str, frontmatter: dict[str, Any]) -> str:
+    lines = ["---"]
+    for key, value in frontmatter.items():
+        lines.append(f"{key}: {_format_frontmatter_value(value)}")
+    lines.extend(["---", "", content.rstrip(), ""])
+    return "\n".join(lines)
+
+
+def _format_frontmatter_value(value: Any) -> str:
+    if value is None:
+        return '""'
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (list, tuple, set)):
+        return "[" + ", ".join(_quote_scalar(item) for item in value) + "]"
+    return _quote_scalar(value)
+
+
+def _quote_scalar(value: Any) -> str:
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{text}"'
 
 
 def _safe_output_path(root_path: Path, output_path: Path) -> Path:
