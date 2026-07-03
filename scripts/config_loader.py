@@ -18,6 +18,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "model": "gpt-4.1-mini",
         "temperature": 0.2,
         "max_retries": 2,
+        "retry_delay_seconds": 0,
         "timeout_seconds": 60,
     },
     "workflow": {

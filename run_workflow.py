@@ -7,7 +7,7 @@ import argparse
 from pathlib import Path
 
 from scripts.config_loader import load_config
-from scripts.llm_client import FakeLLMClient
+from scripts.llm_client import FakeLLMClient, LLMClientError, OpenAILLMClient
 from scripts.workflow_runner import WorkflowRunError, WorkflowRunner
 from scripts.workflow_steps import WORKFLOW_STEPS, get_single_step, get_steps_from
 
@@ -97,10 +97,10 @@ def select_workflow_steps(args: argparse.Namespace):
     return WORKFLOW_STEPS
 
 
-def create_llm_client(args: argparse.Namespace):
+def create_llm_client(args: argparse.Namespace, config: dict):
     if args.mock_llm:
         return FakeLLMClient()
-    raise RuntimeError("Only --mock-llm is supported until the real LLM client is added.")
+    return OpenAILLMClient(config)
 
 
 def main() -> None:
@@ -110,7 +110,10 @@ def main() -> None:
 
     config = load_config(args.config)
     config.setdefault("output", {})["overwrite"] = args.overwrite
-    llm_client = create_llm_client(args)
+    try:
+        llm_client = create_llm_client(args, config)
+    except LLMClientError as error:
+        raise SystemExit(str(error)) from error
 
     runner = WorkflowRunner(
         config=config,
