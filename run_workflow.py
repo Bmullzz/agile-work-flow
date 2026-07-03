@@ -6,72 +6,25 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-try:
-    import yaml
-except ModuleNotFoundError:
-    yaml = None
+from scripts.config_loader import load_config
+from scripts.llm_client import FakeLLMClient
+from scripts.workflow_runner import WorkflowRunError, WorkflowRunner
+from scripts.workflow_steps import WORKFLOW_STEPS, get_single_step, get_steps_from
 
 
 ROOT_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG_PATH = ROOT_DIR / "config.yaml"
 
 
-def load_config(path: Path) -> dict:
-    """Load YAML configuration from disk."""
-    if not path.exists():
-        raise FileNotFoundError(f"Config file not found: {path}")
-
-    content = path.read_text(encoding="utf-8")
-
-    if yaml is not None:
-        return yaml.safe_load(content) or {}
-
-    config = {}
-    for line in content.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        key, separator, value = stripped.partition(":")
-        if not separator:
-            raise ValueError(
-                "PyYAML is not installed and config fallback only supports "
-                f"'key: value' entries. Invalid line: {line}"
-            )
-        config[key.strip()] = value.strip().strip("\"'")
-    return config
-
-
-def read_app_idea(path: Path) -> str:
-    """Read the input application idea markdown file."""
-    if not path.exists():
-        raise FileNotFoundError(f"Input file not found: {path}")
-
-    return path.read_text(encoding="utf-8").strip()
-
-
-def run_workflow(config_path: Path) -> None:
-    config = load_config(config_path)
-
-    input_path = ROOT_DIR / config.get("input_file", "input/app-idea.md")
-    output_dir = ROOT_DIR / config.get("output_dir", "output")
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    app_idea = read_app_idea(input_path)
-
-    print("AI Agile Workflow MVP")
-    print(f"Config: {config_path}")
-    print(f"Input: {input_path}")
-    print(f"Output: {output_dir}")
-    print()
-    print("Loaded app idea:")
-    print(app_idea if app_idea else "(empty)")
-    print()
-    print("Workflow generation is not implemented yet.")
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the local AI Agile Workflow MVP pipeline."
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        help="Path to the YAML config file.",
     )
     parser.add_argument(
         "--input",
@@ -121,8 +74,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def print_runtime_options(args: argparse.Namespace) -> None:
+def print_runtime_options(args: argparse.Namespace, step_count: int) -> None:
     print("AI Agile Workflow MVP")
+    print(f"Config: {args.config.resolve()}")
     print(f"Input: {args.input.resolve()}")
     print(f"Output: {args.output.resolve()}")
     print(f"Mock LLM: {args.mock_llm}")
@@ -132,13 +86,45 @@ def print_runtime_options(args: argparse.Namespace) -> None:
     print(f"Overwrite: {args.overwrite}")
     print(f"From step: {args.from_step}")
     print(f"Step: {args.step}")
-    print()
-    print("Workflow execution is not implemented yet.")
+    print(f"Steps: {step_count}")
+
+
+def select_workflow_steps(args: argparse.Namespace):
+    if args.step:
+        return get_single_step(args.step)
+    if args.from_step:
+        return get_steps_from(args.from_step)
+    return WORKFLOW_STEPS
+
+
+def create_llm_client(args: argparse.Namespace):
+    if args.mock_llm:
+        return FakeLLMClient()
+    raise RuntimeError("Only --mock-llm is supported until the real LLM client is added.")
 
 
 def main() -> None:
     args = parse_args()
-    print_runtime_options(args)
+    selected_steps = select_workflow_steps(args)
+    print_runtime_options(args, len(selected_steps))
+
+    config = load_config(args.config)
+    config.setdefault("output", {})["overwrite"] = args.overwrite
+    llm_client = create_llm_client(args)
+
+    runner = WorkflowRunner(
+        config=config,
+        workflow_steps=selected_steps,
+        llm_client=llm_client,
+    )
+
+    try:
+        result = runner.run(args.input, args.output)
+    except WorkflowRunError as error:
+        raise SystemExit(str(error)) from error
+
+    print()
+    print(f"Completed {len(result.completed_step_ids)} workflow steps.")
 
 
 if __name__ == "__main__":

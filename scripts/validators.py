@@ -74,6 +74,24 @@ def validate_input_file(path: PathValue) -> dict[str, Any]:
     return _result(file_path, not errors, errors, warnings)
 
 
+def validate_generated_markdown(content: str) -> dict[str, Any]:
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if content is None or not content.strip():
+        errors.append("Generated Markdown is empty.")
+        return _result(path=None, is_valid=False, errors=errors, warnings=warnings)
+
+    stripped = content.lstrip()
+    if not stripped.startswith("#"):
+        errors.append("Generated Markdown must start with a heading.")
+
+    if "{{" in content or "}}" in content:
+        warnings.append("Generated Markdown contains unresolved placeholder markers.")
+
+    return _result(path=None, is_valid=not errors, errors=errors, warnings=warnings)
+
+
 def _result(
     path: Any, is_valid: bool, errors: list[str], warnings: list[str]
 ) -> dict[str, Any]:

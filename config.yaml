@@ -8,6 +8,7 @@ llm:
 workflow:
   default_review: true
   resume_enabled: true
+  stop_on_failure: true
   steps:
     - discover
     - plan

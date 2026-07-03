@@ -23,6 +23,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "workflow": {
         "default_review": True,
         "resume_enabled": True,
+        "stop_on_failure": True,
         "steps": [],
     },
     "output": {
