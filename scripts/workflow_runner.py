@@ -20,6 +20,7 @@ from scripts.workflow_state import (
     create_initial_state,
     load_state,
     mark_step_completed,
+    mark_downstream_steps_stale,
     mark_step_failed,
     mark_step_approved,
     mark_step_skipped,
@@ -145,6 +146,7 @@ class WorkflowRunner:
                 existing_output = output_directory / step.output_path
                 if (
                     not overwrite
+                    and step.step_id not in state.stale_steps
                     and self._is_existing_output_valid(step, output_directory)
                 ):
                     result.skipped_step_ids.append(step.step_id)
@@ -161,13 +163,17 @@ class WorkflowRunner:
                     self._save_state_safely(state, state_path)
                     print(f"[{step.step_id}] Skipped existing valid output")
                     continue
+                was_approved_before_generation = step.step_id in state.approved_steps
                 output_path = self._generate_step_output(
                     step,
                     input_file,
                     output_directory,
                     completed_steps,
-                    overwrite,
+                    overwrite or step.step_id in state.stale_steps,
                 )
+                if was_approved_before_generation:
+                    self._mark_downstream_stale(state, step)
+                    self._save_state_safely(state, state_path)
             except Exception as error:
                 message = f"Step {step.step_id} failed: {error}"
                 mark_step_failed(state, step.step_id)
@@ -245,9 +251,9 @@ class WorkflowRunner:
             state.output_files["PROJECT_CONTEXT"] = str(
                 index_result.project_context_path
             )
-            state.workflow_status = "completed"
+            state.workflow_status = "stale" if state.stale_steps else "completed"
             state.current_step = None
-            state.next_step = None
+            state.next_step = state.stale_steps[0] if state.stale_steps else None
             self._save_state_safely(state, state_path)
             for warning in result.index_warnings:
                 print(f"[index] Warning: {warning}")
@@ -273,6 +279,16 @@ class WorkflowRunner:
                 f"Missing completed dependencies for {step.step_id}: "
                 + ", ".join(missing)
             )
+        if state is not None:
+            stale = [
+                step_id
+                for step_id in step.depends_on_step_ids
+                if step_id in state.stale_steps
+            ]
+            if stale:
+                raise WorkflowRunError(
+                    f"Stale dependencies for {step.step_id}: " + ", ".join(stale)
+                )
         if review_enabled and state is not None:
             unapproved = [
                 step_id
@@ -336,6 +352,8 @@ class WorkflowRunner:
     ) -> str | None:
         completed_step_ids = set(state.completed_steps)
         for step in self.workflow_steps:
+            if step.step_id in state.stale_steps:
+                return step.step_id
             if step.step_id not in completed_step_ids:
                 return step.step_id
             if not self._is_existing_output_valid(step, output_directory):
@@ -411,8 +429,17 @@ class WorkflowRunner:
                     completed_steps,
                     overwrite=True,
                 )
+                if step.step_id in state.approved_steps:
+                    self._mark_downstream_stale(state, step)
+                    self._save_state_safely(state, state_path)
                 continue
-            if decision in {ReviewDecision.APPROVE, ReviewDecision.EDIT}:
+            if decision == ReviewDecision.EDIT:
+                if step.step_id in state.approved_steps:
+                    self._mark_downstream_stale(state, step)
+                mark_step_approved(state, step.step_id)
+                self._save_state_safely(state, state_path)
+                return decision
+            if decision == ReviewDecision.APPROVE:
                 mark_step_approved(state, step.step_id)
                 self._save_state_safely(state, state_path)
                 return decision
@@ -452,6 +479,22 @@ class WorkflowRunner:
         if override is not None:
             return override
         return bool(self.config.get("workflow", {}).get("default_review", False))
+
+    def _mark_downstream_stale(
+        self, state: WorkflowState, step: WorkflowStep
+    ) -> list[str]:
+        stale_step_ids = mark_downstream_steps_stale(
+            state, step.step_id, self.workflow_steps
+        )
+        show_stale_steps = getattr(self.review_gate, "show_stale_steps", None)
+        if callable(show_stale_steps):
+            show_stale_steps(step, stale_step_ids)
+        elif stale_step_ids:
+            print(
+                f"[{step.step_id}] Downstream documents marked stale: "
+                + ", ".join(stale_step_ids)
+            )
+        return stale_step_ids
 
     def _load_or_create_state(
         self, input_file: Path, output_directory: Path, path: Path

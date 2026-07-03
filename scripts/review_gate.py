@@ -62,6 +62,13 @@ class ReviewGate:
 
             print("Invalid review command. Choose a, e, r, s, or q.")
 
+    def show_stale_steps(self, step: WorkflowStep, stale_step_ids: list[str]) -> None:
+        if not stale_step_ids:
+            return
+        print(f"\n{step.step_id} changed. Downstream documents marked stale:")
+        for stale_step_id in stale_step_ids:
+            print(f"- {stale_step_id}")
+
     def _validate_output(self, path: Path) -> None:
         validation = self.validator(path)
         if not validation["is_valid"]:

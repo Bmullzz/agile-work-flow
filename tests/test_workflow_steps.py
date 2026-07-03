@@ -3,6 +3,7 @@ from pathlib import Path
 
 from scripts.workflow_steps import (
     WORKFLOW_STEPS,
+    get_downstream_step_ids,
     get_single_step,
     get_step_by_id,
     get_steps_from,
@@ -99,6 +100,18 @@ class WorkflowStepRegistryTests(unittest.TestCase):
 
         self.assertEqual(len(steps), 1)
         self.assertEqual(steps[0].step_id, "10-phased-roadmap")
+
+    def test_get_downstream_step_ids_returns_transitive_dependencies(self):
+        downstream_step_ids = get_downstream_step_ids("03-system-architecture")
+
+        self.assertIn("04-user-journeys", downstream_step_ids)
+        self.assertIn("09-dependency-analysis", downstream_step_ids)
+        self.assertIn("15-documentation-plan", downstream_step_ids)
+        self.assertNotIn("02-tech-stack", downstream_step_ids)
+
+    def test_get_downstream_step_ids_fails_for_unknown_step(self):
+        with self.assertRaises(KeyError):
+            get_downstream_step_ids("unknown-step")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from scripts.models import WorkflowStep
@@ -79,6 +81,18 @@ class ReviewGateTests(unittest.TestCase):
         decision = gate.review(self.step, self.output_path)
 
         self.assertEqual(decision, ReviewDecision.APPROVE)
+
+    def test_show_stale_steps_lists_downstream_documents(self):
+        gate = ReviewGate(input_func=InputScript([]))
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            gate.show_stale_steps(self.step, ["01-next", "02-later"])
+
+        rendered = output.getvalue()
+        self.assertIn("00-test changed", rendered)
+        self.assertIn("01-next", rendered)
+        self.assertIn("02-later", rendered)
 
 
 if __name__ == "__main__":

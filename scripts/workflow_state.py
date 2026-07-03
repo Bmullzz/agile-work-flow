@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from scripts.models import WorkflowState
+from scripts.models import WorkflowState, WorkflowStep
+from scripts.workflow_steps import get_downstream_step_ids
 
 
 STATE_FILE_NAME = ".workflow-state.json"
@@ -83,6 +84,7 @@ def mark_step_completed(
     output_file: str | Path,
     next_step: str | None = None,
 ) -> WorkflowState:
+    _clear_step_stale(state, step_id)
     if step_id not in state.completed_steps:
         state.completed_steps.append(step_id)
     state.output_files[step_id] = str(output_file)
@@ -99,6 +101,7 @@ def mark_step_skipped(
     output_file: str | Path,
     next_step: str | None = None,
 ) -> WorkflowState:
+    _clear_step_stale(state, step_id)
     state.output_files[step_id] = str(output_file)
     state.current_step = None
     state.next_step = next_step
@@ -123,6 +126,7 @@ def mark_workflow_quit(state: WorkflowState, step_id: str) -> WorkflowState:
 
 
 def mark_step_approved(state: WorkflowState, step_id: str) -> WorkflowState:
+    _clear_step_stale(state, step_id)
     if step_id not in state.approved_steps:
         state.approved_steps.append(step_id)
     if state.pending_review_step == step_id:
@@ -130,5 +134,26 @@ def mark_step_approved(state: WorkflowState, step_id: str) -> WorkflowState:
     return state
 
 
+def mark_downstream_steps_stale(
+    state: WorkflowState, step_id: str, workflow_steps: list[WorkflowStep]
+) -> list[str]:
+    downstream_step_ids = get_downstream_step_ids(step_id, workflow_steps)
+    newly_stale_step_ids = []
+    for stale_step_id in downstream_step_ids:
+        if stale_step_id not in state.stale_steps:
+            state.stale_steps.append(stale_step_id)
+            newly_stale_step_ids.append(stale_step_id)
+        if stale_step_id in state.approved_steps:
+            state.approved_steps.remove(stale_step_id)
+    if downstream_step_ids:
+        state.next_step = state.stale_steps[0]
+    return newly_stale_step_ids
+
+
 def state_file_path(output_root: str | Path) -> Path:
     return Path(output_root) / STATE_FILE_NAME
+
+
+def _clear_step_stale(state: WorkflowState, step_id: str) -> None:
+    if step_id in state.stale_steps:
+        state.stale_steps.remove(step_id)

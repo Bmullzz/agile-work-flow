@@ -304,3 +304,22 @@ def get_steps_from(step_id: str) -> list[WorkflowStep]:
 
 def get_single_step(step_id: str) -> list[WorkflowStep]:
     return [get_step_by_id(step_id)]
+
+
+def get_downstream_step_ids(
+    step_id: str, workflow_steps: list[WorkflowStep] | None = None
+) -> list[str]:
+    steps = WORKFLOW_STEPS if workflow_steps is None else workflow_steps
+    step_ids = {step.step_id for step in steps}
+    if step_id not in step_ids:
+        raise KeyError(f"Unknown workflow step ID: {step_id}")
+
+    downstream_step_ids: list[str] = []
+    stale_frontier = {step_id}
+    for step in steps:
+        if step.step_id == step_id:
+            continue
+        if stale_frontier.intersection(step.depends_on_step_ids):
+            downstream_step_ids.append(step.step_id)
+            stale_frontier.add(step.step_id)
+    return downstream_step_ids

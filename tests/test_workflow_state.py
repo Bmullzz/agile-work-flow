@@ -2,10 +2,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts.models import WorkflowStep
 from scripts.workflow_state import (
     WorkflowStateError,
     create_initial_state,
     load_state,
+    mark_downstream_steps_stale,
     mark_step_approved,
     mark_step_completed,
     mark_step_failed,
@@ -92,6 +94,55 @@ class WorkflowStateTests(unittest.TestCase):
         self.assertEqual(state.current_step, "00-app-intake")
         self.assertEqual(state.next_step, "00-app-intake")
         self.assertEqual(state.pending_review_step, "00-app-intake")
+
+    def test_mark_downstream_steps_stale_marks_direct_and_transitive_steps(self):
+        steps = [
+            WorkflowStep(0, "00-first", "First", "00.md", "00.md"),
+            WorkflowStep(
+                1,
+                "01-second",
+                "Second",
+                "01.md",
+                "01.md",
+                depends_on_step_ids=["00-first"],
+            ),
+            WorkflowStep(
+                2,
+                "02-third",
+                "Third",
+                "02.md",
+                "02.md",
+                depends_on_step_ids=["01-second"],
+            ),
+        ]
+        state = create_initial_state("test-project", "input.md", "output")
+        state.approved_steps = ["00-first", "01-second", "02-third"]
+
+        stale_step_ids = mark_downstream_steps_stale(state, "00-first", steps)
+
+        self.assertEqual(stale_step_ids, ["01-second", "02-third"])
+        self.assertEqual(state.stale_steps, ["01-second", "02-third"])
+        self.assertEqual(state.approved_steps, ["00-first"])
+        self.assertEqual(state.next_step, "01-second")
+
+    def test_mark_downstream_steps_stale_fails_for_unknown_step(self):
+        state = create_initial_state("test-project", "input.md", "output")
+
+        with self.assertRaises(KeyError):
+            mark_downstream_steps_stale(state, "missing-step", [])
+
+    def test_completed_step_clears_stale_state(self):
+        state = create_initial_state("test-project", "input.md", "output")
+        state.stale_steps = ["01-product-vision"]
+
+        mark_step_completed(
+            state,
+            "01-product-vision",
+            "output/01-product-vision.md",
+            next_step=None,
+        )
+
+        self.assertEqual(state.stale_steps, [])
 
     def test_load_existing_state(self):
         state = create_initial_state("test-project", "input.md", "output")

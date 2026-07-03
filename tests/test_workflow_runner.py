@@ -85,6 +85,33 @@ class WorkflowRunnerTests(unittest.TestCase):
             ),
         ]
 
+    def make_three_steps(self):
+        return [
+            WorkflowStep(
+                step_number=0,
+                step_id="00-first",
+                name="First",
+                prompt_template_path=Path("unused-first.md"),
+                output_path=Path("00-first.md"),
+            ),
+            WorkflowStep(
+                step_number=1,
+                step_id="01-second",
+                name="Second",
+                prompt_template_path=Path("unused-second.md"),
+                output_path=Path("01-second.md"),
+                depends_on_step_ids=["00-first"],
+            ),
+            WorkflowStep(
+                step_number=2,
+                step_id="02-third",
+                name="Third",
+                prompt_template_path=Path("unused-third.md"),
+                output_path=Path("02-third.md"),
+                depends_on_step_ids=["01-second"],
+            ),
+        ]
+
     def test_runner_executes_steps_in_order(self):
         calls = []
 
@@ -483,6 +510,158 @@ class WorkflowRunnerTests(unittest.TestCase):
 
         state = load_state(self.output_root / ".workflow-state.json")
         self.assertIn(first_step.step_id, state.approved_steps)
+
+    def test_review_edit_marks_downstream_steps_stale(self):
+        steps = self.make_three_steps()
+        self._write_completed_approved_state(steps)
+        review_gate = ScriptedReviewGate([ReviewDecision.EDIT])
+        runner = WorkflowRunner(
+            config={"workflow": {"default_review": True}, "output": {"overwrite": True}},
+            workflow_steps=steps,
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=RecordingLLMClient(),
+            review_gate=review_gate,
+        )
+
+        runner.run(self.input_path, self.output_root, step_id="00-first")
+
+        state = load_state(self.output_root / ".workflow-state.json")
+        self.assertEqual(state.stale_steps, ["01-second", "02-third"])
+        self.assertEqual(state.approved_steps, ["00-first"])
+        self.assertEqual(state.workflow_status, "stale")
+        self.assertEqual(state.next_step, "01-second")
+
+    def test_review_regenerate_marks_downstream_steps_stale(self):
+        steps = self.make_three_steps()
+        self._write_completed_approved_state(steps)
+        review_gate = ScriptedReviewGate(
+            [ReviewDecision.REGENERATE, ReviewDecision.APPROVE]
+        )
+        runner = WorkflowRunner(
+            config={"workflow": {"default_review": True}, "output": {"overwrite": True}},
+            workflow_steps=steps,
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=SequencedLLMClient(),
+            review_gate=review_gate,
+        )
+
+        runner.run(self.input_path, self.output_root, step_id="00-first")
+
+        state = load_state(self.output_root / ".workflow-state.json")
+        self.assertEqual(state.stale_steps, ["01-second", "02-third"])
+        self.assertNotIn("01-second", state.approved_steps)
+        self.assertNotIn("02-third", state.approved_steps)
+
+    def test_stale_dependencies_are_not_used_as_context(self):
+        first_step, second_step = self.make_steps()
+        first_output = self.output_root / first_step.output_path
+        first_output.parent.mkdir(parents=True, exist_ok=True)
+        first_output.write_text("# Existing First\n\nContent", encoding="utf-8")
+        state = create_initial_state(
+            "output",
+            self.input_path,
+            self.output_root,
+            next_step=second_step.step_id,
+        )
+        mark_step_completed(
+            state,
+            first_step.step_id,
+            first_output,
+            next_step=second_step.step_id,
+        )
+        state.stale_steps = [first_step.step_id]
+        save_state(state, self.output_root / ".workflow-state.json")
+        runner = WorkflowRunner(
+            config={},
+            workflow_steps=self.make_steps(),
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=RecordingLLMClient(),
+        )
+
+        with self.assertRaises(WorkflowRunError) as error:
+            runner.run(self.input_path, self.output_root, step_id=second_step.step_id)
+
+        self.assertIn("Stale dependencies", str(error.exception))
+
+    def test_rerun_clears_stale_state_for_regenerated_step(self):
+        steps = self.make_steps()
+        first_step = steps[0]
+        first_output = self.output_root / first_step.output_path
+        first_output.parent.mkdir(parents=True, exist_ok=True)
+        first_output.write_text("# Stale First\n\nContent", encoding="utf-8")
+        state = create_initial_state(
+            "output",
+            self.input_path,
+            self.output_root,
+            next_step=first_step.step_id,
+        )
+        mark_step_completed(
+            state,
+            first_step.step_id,
+            first_output,
+            next_step=first_step.step_id,
+        )
+        state.stale_steps = [first_step.step_id]
+        save_state(state, self.output_root / ".workflow-state.json")
+        runner = WorkflowRunner(
+            config={"output": {"overwrite": False}},
+            workflow_steps=[first_step],
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=RecordingLLMClient("# Regenerated\n\nContent"),
+        )
+
+        runner.run(self.input_path, self.output_root, step_id=first_step.step_id)
+
+        state = load_state(self.output_root / ".workflow-state.json")
+        self.assertEqual(state.stale_steps, [])
+        self.assertEqual(
+            first_output.read_text(encoding="utf-8"),
+            "# Regenerated\n\nContent\n",
+        )
+
+    def test_resume_starts_from_first_stale_step(self):
+        steps = self.make_three_steps()
+        self._write_completed_approved_state(steps)
+        state = load_state(self.output_root / ".workflow-state.json")
+        state.stale_steps = ["01-second", "02-third"]
+        state.approved_steps = ["00-first"]
+        state.next_step = None
+        save_state(state, self.output_root / ".workflow-state.json")
+        runner = WorkflowRunner(
+            config={"output": {"overwrite": False}},
+            workflow_steps=steps,
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=RecordingLLMClient("# Regenerated\n\nContent"),
+        )
+
+        result = runner.run(self.input_path, self.output_root, resume=True)
+
+        self.assertEqual(result.completed_step_ids, ["01-second", "02-third"])
+        state = load_state(self.output_root / ".workflow-state.json")
+        self.assertEqual(state.stale_steps, [])
+        self.assertEqual(state.workflow_status, "completed")
+
+    def _write_completed_approved_state(self, steps):
+        state = create_initial_state(
+            "output",
+            self.input_path,
+            self.output_root,
+            next_step=None,
+        )
+        for index, step in enumerate(steps):
+            output_path = self.output_root / step.output_path
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(f"# Existing {step.name}\n\nContent", encoding="utf-8")
+            next_step = steps[index + 1].step_id if index + 1 < len(steps) else None
+            mark_step_completed(state, step.step_id, output_path, next_step=next_step)
+            state.approved_steps.append(step.step_id)
+        save_state(state, self.output_root / ".workflow-state.json")
+        return state
 
 
 if __name__ == "__main__":
