@@ -109,6 +109,8 @@ class WorkflowRunnerTests(unittest.TestCase):
             result.output_paths["00-first"].read_text(encoding="utf-8"),
             "# Generated\n\nOutput\n",
         )
+        self.assertTrue((self.output_root / "README.md").is_file())
+        self.assertTrue((self.output_root / "project-context.md").is_file())
 
     def test_failure_stops_workflow(self):
         llm_client = RecordingLLMClient("not markdown")

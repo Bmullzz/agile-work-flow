@@ -9,6 +9,8 @@ from scripts.workflow_steps import WORKFLOW_STEPS
 
 
 EXPECTED_OUTPUT_FILES = [
+    "README.md",
+    "project-context.md",
     "00-intake/00-app-intake.md",
     "01-product/01-product-vision.md",
     "02-technical/02-tech-stack.md",
@@ -65,6 +67,9 @@ class EndToEndMockWorkflowTests(unittest.TestCase):
                     output_file.read_text(encoding="utf-8").startswith("#"),
                     f"Invalid Markdown heading in: {relative_path}",
                 )
+        readme = (self.output_root / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Recommended Implementation Path", readme)
+        self.assertIn("06-agent-prompts/12-coding-agent-prompts.md", readme)
 
     def test_full_mock_workflow_is_deterministic(self):
         first_outputs = self._run_full_mock_workflow(self.tmp_path / "first")

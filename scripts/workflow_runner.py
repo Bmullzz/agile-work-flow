@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from scripts.context_builder import build_context
+from scripts.index_writer import IndexWriter
 from scripts.llm_client import LLMClient
 from scripts.markdown_writer import write_markdown
 from scripts.models import WorkflowStep
@@ -33,6 +34,8 @@ class WorkflowRunResult:
     output_paths: dict[str, Path] = field(default_factory=dict)
     failed_step_id: Optional[str] = None
     errors: list[str] = field(default_factory=list)
+    index_paths: dict[str, Path] = field(default_factory=dict)
+    index_warnings: list[str] = field(default_factory=list)
 
 
 class WorkflowRunner:
@@ -46,6 +49,7 @@ class WorkflowRunner:
         markdown_writer: MarkdownWriter = write_markdown,
         input_validator: InputValidator = validate_input_file,
         output_validator: OutputValidator = validate_generated_markdown,
+        index_writer: IndexWriter | None = None,
     ) -> None:
         if llm_client is None:
             raise ValueError("llm_client is required.")
@@ -58,6 +62,7 @@ class WorkflowRunner:
         self.markdown_writer = markdown_writer
         self.input_validator = input_validator
         self.output_validator = output_validator
+        self.index_writer = index_writer or IndexWriter()
 
     def run(self, input_path: str | Path, output_root: str | Path) -> WorkflowRunResult:
         input_file = Path(input_path)
@@ -106,6 +111,30 @@ class WorkflowRunner:
             result.completed_step_ids.append(step.step_id)
             result.output_paths[step.step_id] = output_path
             print(f"[{step.step_id}] Wrote {output_path}")
+
+        if result.failed_step_id is None:
+            try:
+                index_result = self.index_writer.write_indexes(
+                    output_directory,
+                    self.workflow_steps,
+                    run_metadata={
+                        "generated_at": "not recorded",
+                        "completed_steps": len(result.completed_step_ids),
+                    },
+                )
+            except Exception as error:
+                message = f"Index generation failed: {error}"
+                self._fail(result, "index", message)
+
+            result.index_paths = {
+                "README": index_result.readme_path,
+                "PROJECT_CONTEXT": index_result.project_context_path,
+            }
+            result.index_warnings = list(index_result.warnings)
+            for warning in result.index_warnings:
+                print(f"[index] Warning: {warning}")
+            print(f"[index] Wrote {index_result.readme_path}")
+            print(f"[index] Wrote {index_result.project_context_path}")
 
         return result
 
