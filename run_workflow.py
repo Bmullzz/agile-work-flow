@@ -69,22 +69,76 @@ def run_workflow(config_path: Path) -> None:
     print("Workflow generation is not implemented yet.")
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the local AI Agile Workflow MVP pipeline."
     )
     parser.add_argument(
-        "--config",
+        "--input",
         type=Path,
-        default=DEFAULT_CONFIG_PATH,
-        help="Path to the YAML config file.",
+        required=True,
+        help="Path to the input app idea markdown file.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="Path to the output directory for generated artifacts.",
+    )
+    parser.add_argument(
+        "--mock-llm",
+        action="store_true",
+        help="Use mock LLM responses instead of real model calls.",
+    )
+    parser.add_argument(
+        "--review",
+        action="store_true",
+        help="Enable human review checkpoints.",
+    )
+    parser.add_argument(
+        "--no-review",
+        action="store_true",
+        help="Disable human review checkpoints.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume a previous workflow run.",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing generated artifacts.",
+    )
+    parser.add_argument(
+        "--from-step",
+        help="Resume or start workflow execution from a named step.",
+    )
+    parser.add_argument(
+        "--step",
+        help="Run only a specific named workflow step.",
+    )
+    return parser.parse_args(argv)
+
+
+def print_runtime_options(args: argparse.Namespace) -> None:
+    print("AI Agile Workflow MVP")
+    print(f"Input: {args.input.resolve()}")
+    print(f"Output: {args.output.resolve()}")
+    print(f"Mock LLM: {args.mock_llm}")
+    print(f"Review: {args.review}")
+    print(f"No review: {args.no_review}")
+    print(f"Resume: {args.resume}")
+    print(f"Overwrite: {args.overwrite}")
+    print(f"From step: {args.from_step}")
+    print(f"Step: {args.step}")
+    print()
+    print("Workflow execution is not implemented yet.")
 
 
 def main() -> None:
     args = parse_args()
-    run_workflow(args.config.resolve())
+    print_runtime_options(args)
 
 
 if __name__ == "__main__":
