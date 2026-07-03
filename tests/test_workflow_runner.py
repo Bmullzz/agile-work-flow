@@ -197,6 +197,31 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(state.workflow_status, "failed")
         self.assertEqual(state.failed_step, "00-first")
 
+    def test_missing_required_section_stops_workflow(self):
+        llm_client = RecordingLLMClient("# Generated\n\nNo required section here")
+        step = WorkflowStep(
+            step_number=0,
+            step_id="00-first",
+            name="First",
+            prompt_template_path=Path("unused-first.md"),
+            output_path=Path("00-first.md"),
+            required_sections=["Overview"],
+        )
+        runner = WorkflowRunner(
+            config={"workflow": {"stop_on_failure": True}},
+            workflow_steps=[step],
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=llm_client,
+        )
+
+        with self.assertRaises(WorkflowRunError) as error:
+            runner.run(self.input_path, self.output_root)
+
+        self.assertIn("missing required sections", str(error.exception).lower())
+        state = load_state(self.output_root / ".workflow-state.json")
+        self.assertEqual(state.workflow_status, "failed")
+
     def test_dependencies_are_enforced(self):
         step = WorkflowStep(
             step_number=0,
@@ -277,6 +302,29 @@ class WorkflowRunnerTests(unittest.TestCase):
         llm_client = RecordingLLMClient("# New\n\nContent")
         runner = WorkflowRunner(
             config={"output": {"overwrite": False}},
+            workflow_steps=[first_step],
+            prompt_loader=lambda path, context: "# Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {},
+            llm_client=llm_client,
+        )
+
+        result = runner.run(self.input_path, self.output_root)
+
+        self.assertEqual(result.skipped_step_ids, [first_step.step_id])
+        self.assertEqual(llm_client.prompts, [])
+        self.assertEqual(existing_output.read_text(encoding="utf-8"), "# Existing\n\nContent")
+
+    def test_strict_warning_mode_skips_existing_clean_output(self):
+        first_step = self.make_steps()[0]
+        existing_output = self.output_root / first_step.output_path
+        existing_output.parent.mkdir(parents=True, exist_ok=True)
+        existing_output.write_text("# Existing\n\nContent", encoding="utf-8")
+        llm_client = RecordingLLMClient("# New\n\nContent")
+        runner = WorkflowRunner(
+            config={
+                "workflow": {"fail_on_warnings": True},
+                "output": {"overwrite": False},
+            },
             workflow_steps=[first_step],
             prompt_loader=lambda path, context: "# Prompt",
             context_builder=lambda step, input_path, output_root, completed_steps: {},

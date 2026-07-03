@@ -10,6 +10,7 @@ workflow:
   default_review: false
   resume_enabled: true
   stop_on_failure: true
+  fail_on_warnings: false
   steps:
     - discover
     - plan

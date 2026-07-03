@@ -13,7 +13,7 @@ from scripts.markdown_writer import write_markdown
 from scripts.models import WorkflowStep
 from scripts.prompt_loader import render_prompt_file
 from scripts.review_gate import ReviewDecision, ReviewGate
-from scripts.validators import validate_generated_markdown, validate_input_file
+from scripts.validators import validate_input_file, validate_markdown_content
 from scripts.workflow_state import (
     WorkflowState,
     WorkflowStateError,
@@ -37,7 +37,7 @@ ContextBuilder = Callable[
 ]
 MarkdownWriter = Callable[[Path, Path, str, bool], Path]
 InputValidator = Callable[[Path], dict[str, Any]]
-OutputValidator = Callable[[str], dict[str, Any]]
+OutputValidator = Callable[[str, Optional[list[str]]], dict[str, Any]]
 
 
 class WorkflowRunError(RuntimeError):
@@ -67,7 +67,7 @@ class WorkflowRunner:
         llm_client: LLMClient | None = None,
         markdown_writer: MarkdownWriter = write_markdown,
         input_validator: InputValidator = validate_input_file,
-        output_validator: OutputValidator = validate_generated_markdown,
+        output_validator: OutputValidator = validate_markdown_content,
         index_writer: IndexWriter | None = None,
         review_gate: ReviewGate | None = None,
     ) -> None:
@@ -82,8 +82,13 @@ class WorkflowRunner:
         self.markdown_writer = markdown_writer
         self.input_validator = input_validator
         self.output_validator = output_validator
+        self.fail_on_warnings = bool(
+            self.config.get("workflow", {}).get("fail_on_warnings", False)
+        )
         self.index_writer = index_writer or IndexWriter()
-        self.review_gate = review_gate or ReviewGate()
+        self.review_gate = review_gate or ReviewGate(
+            fail_on_warnings=self.fail_on_warnings
+        )
 
     def run(
         self,
@@ -373,12 +378,13 @@ class WorkflowRunner:
         raise WorkflowRunError(f"Unknown workflow step ID: {step_id}")
 
     def _validate_generated_markdown(self, step: WorkflowStep, content: str) -> None:
-        validation = self.output_validator(content)
+        validation = self.output_validator(content, step.required_sections)
         if not validation["is_valid"]:
             raise WorkflowRunError(
                 f"Invalid generated Markdown for {step.step_id}: "
                 + "; ".join(validation["errors"])
             )
+        self._handle_validation_warnings(step, validation["warnings"])
 
     def _generate_step_output(
         self,
@@ -531,7 +537,22 @@ class WorkflowRunner:
             content = output_path.read_text(encoding="utf-8")
         except OSError:
             return False
-        return bool(self.output_validator(content)["is_valid"])
+        validation = self.output_validator(content, step.required_sections)
+        if not validation["is_valid"]:
+            return False
+        return not (self.fail_on_warnings and validation["warnings"])
+
+    def _handle_validation_warnings(
+        self, step: WorkflowStep, warnings: list[str]
+    ) -> None:
+        if not warnings:
+            return
+        if self.fail_on_warnings:
+            raise WorkflowRunError(
+                f"Validation warnings for {step.step_id}: " + "; ".join(warnings)
+            )
+        for warning in warnings:
+            print(f"[{step.step_id}] Warning: {warning}")
 
     def _fail(
         self, result: WorkflowRunResult, step_id: str, message: str

@@ -25,6 +25,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "default_review": False,
         "resume_enabled": True,
         "stop_on_failure": True,
+        "fail_on_warnings": False,
         "steps": [],
     },
     "output": {

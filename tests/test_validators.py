@@ -2,7 +2,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.validators import validate_input_file
+from scripts.validators import (
+    validate_input_file,
+    validate_markdown_content,
+    validate_markdown_file,
+)
 
 
 class InputValidatorTests(unittest.TestCase):
@@ -107,6 +111,54 @@ Create a command line planning assistant that reads an app concept and writes us
 
         self.assertTrue(result["is_valid"])
         self.assertEqual(result["errors"], [])
+
+    def test_valid_markdown_content_passes_with_required_sections(self):
+        result = validate_markdown_content(
+            "# Product Vision\n\n## Overview\n\nBuild a local workflow planner.",
+            required_sections=["Overview"],
+        )
+
+        self.assertTrue(result["is_valid"])
+        self.assertEqual(result["errors"], [])
+
+    def test_empty_markdown_content_fails(self):
+        result = validate_markdown_content("")
+
+        self.assertFalse(result["is_valid"])
+        self.assertIn("empty", result["errors"][0].lower())
+
+    def test_markdown_without_heading_fails(self):
+        result = validate_markdown_content("Build a local workflow planner.")
+
+        self.assertFalse(result["is_valid"])
+        self.assertIn("heading", result["errors"][0].lower())
+
+    def test_missing_required_section_fails(self):
+        result = validate_markdown_content(
+            "# Product Vision\n\n## Overview\n\nBuild a local workflow planner.",
+            required_sections=["Architecture"],
+        )
+
+        self.assertFalse(result["is_valid"])
+        self.assertTrue(any("missing required sections" in error for error in result["errors"]))
+
+    def test_validate_markdown_file_uses_required_sections(self):
+        file_path = self.write_file(
+            "doc.md",
+            "# Product Vision\n\n## Overview\n\nBuild a local workflow planner.",
+        )
+
+        result = validate_markdown_file(file_path, required_sections=["Overview"])
+
+        self.assertTrue(result["is_valid"])
+
+    def test_open_questions_emit_warning(self):
+        result = validate_markdown_content(
+            "# Product Vision\n\n## Open Questions\n\n- What platform should we target?"
+        )
+
+        self.assertTrue(result["is_valid"])
+        self.assertTrue(result["warnings"])
 
     def test_missing_app_idea_heading_warns_but_clear_description_passes(self):
         file_path = self.write_file(

@@ -26,10 +26,12 @@ class ReviewGate:
     def __init__(
         self,
         input_func: Callable[[str], str] = input,
-        validator: Callable[[Path], dict] = validate_markdown_file,
+        validator: Callable[..., dict] = validate_markdown_file,
+        fail_on_warnings: bool = False,
     ) -> None:
         self.input_func = input_func
         self.validator = validator
+        self.fail_on_warnings = fail_on_warnings
 
     def review(self, step: WorkflowStep, output_path: str | Path) -> ReviewDecision:
         path = Path(output_path)
@@ -46,16 +48,16 @@ class ReviewGate:
             ).strip().lower()
 
             if command == "a":
-                self._validate_output(path)
+                self._validate_output(path, step.required_sections)
                 return ReviewDecision.APPROVE
             if command == "e":
                 self.input_func("Edit the file, then press Enter to continue: ")
-                self._validate_output(path)
+                self._validate_output(path, step.required_sections)
                 return ReviewDecision.EDIT
             if command == "r":
                 return ReviewDecision.REGENERATE
             if command == "s":
-                self._validate_output(path)
+                self._validate_output(path, step.required_sections)
                 return ReviewDecision.SKIP
             if command == "q":
                 return ReviewDecision.QUIT
@@ -69,9 +71,21 @@ class ReviewGate:
         for stale_step_id in stale_step_ids:
             print(f"- {stale_step_id}")
 
-    def _validate_output(self, path: Path) -> None:
-        validation = self.validator(path)
+    def _validate_output(self, path: Path, required_sections: list[str] | None) -> None:
+        validation = self._run_validator(path, required_sections)
         if not validation["is_valid"]:
             raise ReviewGateError(
                 "Reviewed document is invalid: " + "; ".join(validation["errors"])
             )
+        if self.fail_on_warnings and validation["warnings"]:
+            raise ReviewGateError(
+                "Reviewed document has warnings: " + "; ".join(validation["warnings"])
+            )
+
+    def _run_validator(
+        self, path: Path, required_sections: list[str] | None
+    ) -> dict:
+        try:
+            return self.validator(path, required_sections)
+        except TypeError:
+            return self.validator(path)

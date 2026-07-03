@@ -1,4 +1,4 @@
-"""Input validation helpers for workflow startup."""
+"""Input and Markdown validation helpers for workflow startup."""
 
 from __future__ import annotations
 
@@ -74,7 +74,10 @@ def validate_input_file(path: PathValue) -> dict[str, Any]:
     return _result(file_path, not errors, errors, warnings)
 
 
-def validate_generated_markdown(content: str) -> dict[str, Any]:
+def validate_markdown_content(
+    content: str,
+    required_sections: list[str] | None = None,
+) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
 
@@ -86,13 +89,30 @@ def validate_generated_markdown(content: str) -> dict[str, Any]:
     if not stripped.startswith("#"):
         errors.append("Generated Markdown must start with a heading.")
 
+    if required_sections:
+        missing_sections = _missing_sections(content, required_sections)
+        if missing_sections:
+            errors.append(
+                "Generated Markdown is missing required sections: "
+                + ", ".join(missing_sections)
+            )
+
+    warnings.extend(_detect_open_question_warnings(content))
     if "{{" in content or "}}" in content:
         warnings.append("Generated Markdown contains unresolved placeholder markers.")
 
     return _result(path=None, is_valid=not errors, errors=errors, warnings=warnings)
 
 
-def validate_markdown_file(path: PathValue) -> dict[str, Any]:
+def validate_generated_markdown(
+    content: str, required_sections: list[str] | None = None
+) -> dict[str, Any]:
+    return validate_markdown_content(content, required_sections=required_sections)
+
+
+def validate_markdown_file(
+    path: PathValue, required_sections: list[str] | None = None
+) -> dict[str, Any]:
     try:
         file_path = _as_path(path)
     except ValueError as error:
@@ -125,7 +145,7 @@ def validate_markdown_file(path: PathValue) -> dict[str, Any]:
     except OSError as error:
         return _result(file_path, False, [f"Markdown file could not be read: {error}"], [])
 
-    result = validate_generated_markdown(content)
+    result = validate_markdown_content(content, required_sections=required_sections)
     result["path"] = str(file_path)
     return result
 
@@ -177,3 +197,44 @@ def _is_meaningful_app_idea(text: str) -> bool:
     ]
 
     return len(words) >= 10 and len(substantive_words) >= 5
+
+
+def _missing_sections(content: str, required_sections: list[str]) -> list[str]:
+    headings = _extract_headings(content)
+    missing = []
+    for section in required_sections:
+        if not any(_heading_matches(heading, section) for heading in headings):
+            missing.append(section)
+    return missing
+
+
+def _extract_headings(content: str) -> list[str]:
+    headings: list[str] = []
+    for line in _strip_code_fences(content).splitlines():
+        match = re.match(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$", line)
+        if match:
+            headings.append(match.group(2).strip().rstrip("#").strip())
+    return headings
+
+
+def _strip_code_fences(content: str) -> str:
+    return re.sub(r"```.*?```", " ", content, flags=re.DOTALL)
+
+
+def _heading_matches(heading: str, expected: str) -> bool:
+    normalized_heading = re.sub(r"\s+", " ", heading).strip().lower()
+    normalized_expected = re.sub(r"\s+", " ", expected).strip().lower()
+    return normalized_heading == normalized_expected
+
+
+def _detect_open_question_warnings(content: str) -> list[str]:
+    warnings: list[str] = []
+    lowered = content.lower()
+    if "open questions" in lowered:
+        warnings.append(
+            "Generated Markdown includes an 'Open Questions' section. "
+            "Review unresolved items before using downstream."
+        )
+    if re.search(r"^\s*[-*+]\s*(todo|tbd|tba)\b", lowered, flags=re.MULTILINE):
+        warnings.append("Generated Markdown includes TODO/TBD items.")
+    return warnings

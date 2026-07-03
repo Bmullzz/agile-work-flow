@@ -94,6 +94,20 @@ class ReviewGateTests(unittest.TestCase):
         self.assertIn("01-next", rendered)
         self.assertIn("02-later", rendered)
 
+    def test_edit_decision_checks_required_sections(self):
+        seen_required_sections = []
+
+        def validator(path, required_sections=None):
+            seen_required_sections.append(required_sections)
+            return {"is_valid": True, "errors": [], "warnings": [], "path": str(path)}
+
+        gate = ReviewGate(input_func=InputScript(["e", ""]), validator=validator)
+
+        decision = gate.review(self.step, self.output_path)
+
+        self.assertEqual(decision, ReviewDecision.EDIT)
+        self.assertEqual(seen_required_sections, [self.step.required_sections])
+
 
 if __name__ == "__main__":
     unittest.main()
