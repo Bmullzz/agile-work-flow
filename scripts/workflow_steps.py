@@ -11,7 +11,7 @@ WORKFLOW_STEPS = [
         step_id="00-app-intake",
         name="App Intake",
         prompt_template_path="prompts/00-app-intake.md",
-        output_path="output/00-app-intake.md",
+        output_path="00-app-intake.md",
         depends_on_step_ids=[],
         required_sections=[
             "Summary",
@@ -26,7 +26,7 @@ WORKFLOW_STEPS = [
         step_id="01-product-vision",
         name="Product Vision",
         prompt_template_path="prompts/01-product-vision.md",
-        output_path="output/01-product-vision.md",
+        output_path="01-product-vision.md",
         depends_on_step_ids=["00-app-intake"],
         required_sections=[
             "Product Vision",
@@ -41,8 +41,8 @@ WORKFLOW_STEPS = [
         step_id="02-tech-stack",
         name="Tech Stack",
         prompt_template_path="prompts/02-tech-stack.md",
-        output_path="output/02-tech-stack.md",
-        depends_on_step_ids=["01-product-vision"],
+        output_path="02-tech-stack.md",
+        depends_on_step_ids=["00-app-intake", "01-product-vision"],
         required_sections=[
             "Recommended Stack",
             "Rationale",
@@ -55,7 +55,7 @@ WORKFLOW_STEPS = [
         step_id="03-system-architecture",
         name="System Architecture",
         prompt_template_path="prompts/03-system-architecture.md",
-        output_path="output/03-system-architecture.md",
+        output_path="03-system-architecture.md",
         depends_on_step_ids=["01-product-vision", "02-tech-stack"],
         required_sections=[
             "Architecture Overview",
@@ -69,8 +69,12 @@ WORKFLOW_STEPS = [
         step_id="04-user-journeys",
         name="User Journeys",
         prompt_template_path="prompts/04-user-journeys.md",
-        output_path="output/04-user-journeys.md",
-        depends_on_step_ids=["01-product-vision", "03-system-architecture"],
+        output_path="04-user-journeys.md",
+        depends_on_step_ids=[
+            "00-app-intake",
+            "01-product-vision",
+            "03-system-architecture",
+        ],
         required_sections=[
             "Primary Journey",
             "Supporting Journeys",
@@ -83,8 +87,12 @@ WORKFLOW_STEPS = [
         step_id="05-epics",
         name="Epics",
         prompt_template_path="prompts/05-epics.md",
-        output_path="output/05-epics.md",
-        depends_on_step_ids=["04-user-journeys"],
+        output_path="05-epics.md",
+        depends_on_step_ids=[
+            "01-product-vision",
+            "03-system-architecture",
+            "04-user-journeys",
+        ],
         required_sections=[
             "Epic Summary",
             "Epics",
@@ -97,8 +105,12 @@ WORKFLOW_STEPS = [
         step_id="06-product-user-stories",
         name="Product User Stories",
         prompt_template_path="prompts/06-product-user-stories.md",
-        output_path="output/06-product-user-stories.md",
-        depends_on_step_ids=["05-epics"],
+        output_path="06-product-user-stories.md",
+        depends_on_step_ids=[
+            "00-app-intake",
+            "01-product-vision",
+            "05-epics",
+        ],
         required_sections=[
             "Story List",
             "Acceptance Criteria",
@@ -111,8 +123,9 @@ WORKFLOW_STEPS = [
         step_id="07-technical-stories",
         name="Technical Stories",
         prompt_template_path="prompts/07-technical-stories.md",
-        output_path="output/07-technical-stories.md",
+        output_path="07-technical-stories.md",
         depends_on_step_ids=[
+            "01-product-vision",
             "02-tech-stack",
             "03-system-architecture",
             "06-product-user-stories",
@@ -129,7 +142,7 @@ WORKFLOW_STEPS = [
         step_id="08-stories-by-application-layer",
         name="Stories by Application Layer",
         prompt_template_path="prompts/08-stories-by-application-layer.md",
-        output_path="output/08-stories-by-application-layer.md",
+        output_path="08-stories-by-application-layer.md",
         depends_on_step_ids=["03-system-architecture", "07-technical-stories"],
         required_sections=[
             "Layer Overview",
@@ -143,8 +156,9 @@ WORKFLOW_STEPS = [
         step_id="09-dependency-analysis",
         name="Dependency Analysis",
         prompt_template_path="prompts/09-dependency-analysis.md",
-        output_path="output/09-dependency-analysis.md",
+        output_path="09-dependency-analysis.md",
         depends_on_step_ids=[
+            "03-system-architecture",
             "07-technical-stories",
             "08-stories-by-application-layer",
         ],
@@ -161,7 +175,7 @@ WORKFLOW_STEPS = [
         step_id="10-phased-roadmap",
         name="Phased Roadmap",
         prompt_template_path="prompts/10-phased-roadmap.md",
-        output_path="output/10-phased-roadmap.md",
+        output_path="10-phased-roadmap.md",
         depends_on_step_ids=[
             "01-product-vision",
             "07-technical-stories",
@@ -180,7 +194,7 @@ WORKFLOW_STEPS = [
         step_id="11-coding-agent-optimized-stories",
         name="Coding-Agent-Optimized Stories",
         prompt_template_path="prompts/11-coding-agent-optimized-stories.md",
-        output_path="output/11-coding-agent-optimized-stories.md",
+        output_path="11-coding-agent-optimized-stories.md",
         depends_on_step_ids=[
             "07-technical-stories",
             "09-dependency-analysis",
@@ -199,8 +213,9 @@ WORKFLOW_STEPS = [
         step_id="12-coding-agent-prompts",
         name="Coding-Agent Prompts",
         prompt_template_path="prompts/12-coding-agent-prompts.md",
-        output_path="output/12-coding-agent-prompts.md",
+        output_path="12-coding-agent-prompts.md",
         depends_on_step_ids=[
+            "07-technical-stories",
             "10-phased-roadmap",
             "11-coding-agent-optimized-stories",
         ],
@@ -216,8 +231,9 @@ WORKFLOW_STEPS = [
         step_id="13-project-setup-prompt",
         name="Project Setup Prompt",
         prompt_template_path="prompts/13-project-setup-prompt.md",
-        output_path="output/13-project-setup-prompt.md",
+        output_path="13-project-setup-prompt.md",
         depends_on_step_ids=[
+            "01-product-vision",
             "02-tech-stack",
             "03-system-architecture",
             "10-phased-roadmap",
@@ -236,8 +252,9 @@ WORKFLOW_STEPS = [
         step_id="14-qa-validation-plan",
         name="QA Validation Plan",
         prompt_template_path="prompts/14-qa-validation-plan.md",
-        output_path="output/14-qa-validation-plan.md",
+        output_path="14-qa-validation-plan.md",
         depends_on_step_ids=[
+            "01-product-vision",
             "07-technical-stories",
             "09-dependency-analysis",
             "10-phased-roadmap",
@@ -255,8 +272,9 @@ WORKFLOW_STEPS = [
         step_id="15-documentation-plan",
         name="Documentation Plan",
         prompt_template_path="prompts/15-documentation-plan.md",
-        output_path="output/15-documentation-plan.md",
+        output_path="15-documentation-plan.md",
         depends_on_step_ids=[
+            "01-product-vision",
             "02-tech-stack",
             "03-system-architecture",
             "10-phased-roadmap",
