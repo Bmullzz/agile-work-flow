@@ -13,3 +13,5 @@ venv/
 
 output/*
 !output/.gitkeep
+.cyboflow/worktrees/
+worktrees/

@@ -7,6 +7,8 @@ import time
 from typing import Any, Callable
 from typing import Protocol
 
+from scripts.logger import get_workflow_logger, redact_secrets
+
 
 class LLMClient(Protocol):
     def generate(self, prompt: str) -> str:
@@ -26,6 +28,7 @@ class OpenAILLMClient:
         api_key: str | None = None,
         openai_client: Any | None = None,
         env_loader: Callable[[], Any] | None = None,
+        logger: Any | None = None,
     ) -> None:
         self.config = config or {}
         llm_config = self.config.get("llm", {})
@@ -34,6 +37,7 @@ class OpenAILLMClient:
         self.max_retries = int(llm_config.get("max_retries", 2))
         self.retry_delay_seconds = float(llm_config.get("retry_delay_seconds", 0))
         self.timeout_seconds = float(llm_config.get("timeout_seconds", 60))
+        self.logger = logger or get_workflow_logger()
 
         self._load_environment(env_loader)
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
@@ -73,6 +77,12 @@ class OpenAILLMClient:
                     raise LLMClientError(
                         f"OpenAI generation failed: {_safe_error_message(error)}"
                     ) from error
+                self.logger.warning(
+                    "llm_retry attempt=%s max_retries=%s error=%s",
+                    attempt + 1,
+                    self.max_retries,
+                    redact_secrets(_safe_error_message(error)),
+                )
                 if self.retry_delay_seconds > 0:
                     time.sleep(self.retry_delay_seconds)
 

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from scripts.context_builder import build_context
 from scripts.index_writer import IndexWriter
+from scripts.logger import get_workflow_logger, redact_secrets, setup_workflow_logging
 from scripts.llm_client import LLMClient
 from scripts.markdown_writer import write_markdown
 from scripts.models import WorkflowStep
@@ -70,6 +72,7 @@ class WorkflowRunner:
         output_validator: OutputValidator = validate_markdown_content,
         index_writer: IndexWriter | None = None,
         review_gate: ReviewGate | None = None,
+        logger: logging.Logger | None = None,
     ) -> None:
         if llm_client is None:
             raise ValueError("llm_client is required.")
@@ -89,6 +92,7 @@ class WorkflowRunner:
         self.review_gate = review_gate or ReviewGate(
             fail_on_warnings=self.fail_on_warnings
         )
+        self.logger = logger or get_workflow_logger()
 
     def run(
         self,
@@ -106,9 +110,23 @@ class WorkflowRunner:
         completed_step_ids: set[str] = set()
         state_path = state_file_path(output_directory)
         result.state_path = state_path
+        self.logger, log_path = setup_workflow_logging(output_directory)
+        self.logger.info(
+            "workflow_start input=%s output=%s resume=%s step=%s from_step=%s",
+            input_file,
+            output_directory,
+            resume,
+            step_id,
+            from_step_id,
+        )
+        self.logger.info("log_file path=%s", log_path)
 
         input_validation = self.input_validator(input_file)
         if not input_validation["is_valid"]:
+            self.logger.error(
+                "validation_failure step=input errors=%s",
+                "; ".join(input_validation["errors"]),
+            )
             self._fail(
                 result,
                 "input",
@@ -135,6 +153,7 @@ class WorkflowRunner:
 
         for index, step in enumerate(steps_to_run):
             print(f"[{step.step_id}] Starting {step.name}")
+            self.logger.info("step_start step=%s name=%s", step.step_id, step.name)
             try:
                 self._check_dependencies(
                     step,
@@ -167,6 +186,11 @@ class WorkflowRunner:
                     )
                     self._save_state_safely(state, state_path)
                     print(f"[{step.step_id}] Skipped existing valid output")
+                    self.logger.info(
+                        "step_skip step=%s output=%s reason=existing_valid_output",
+                        step.step_id,
+                        existing_output,
+                    )
                     continue
                 was_approved_before_generation = step.step_id in state.approved_steps
                 output_path = self._generate_step_output(
@@ -181,6 +205,11 @@ class WorkflowRunner:
                     self._save_state_safely(state, state_path)
             except Exception as error:
                 message = f"Step {step.step_id} failed: {error}"
+                self.logger.error(
+                    "step_failure step=%s error=%s",
+                    step.step_id,
+                    redact_secrets(error),
+                )
                 mark_step_failed(state, step.step_id)
                 self._save_state_safely(state, state_path)
                 if self._stop_on_failure():
@@ -204,6 +233,11 @@ class WorkflowRunner:
                 )
             except Exception as error:
                 message = f"Step {step.step_id} failed: {error}"
+                self.logger.error(
+                    "step_failure step=%s error=%s",
+                    step.step_id,
+                    redact_secrets(error),
+                )
                 mark_step_failed(state, step.step_id)
                 self._save_state_safely(state, state_path)
                 if self._stop_on_failure():
@@ -218,6 +252,7 @@ class WorkflowRunner:
                 self._save_state_safely(state, state_path)
                 result.quit_requested = True
                 print(f"[{step.step_id}] Review requested quit.")
+                self.logger.info("workflow_quit step=%s", step.step_id)
                 return result
 
             self._record_step_success(
@@ -232,6 +267,9 @@ class WorkflowRunner:
             )
             self._save_state_safely(state, state_path)
             print(f"[{step.step_id}] Wrote {output_path}")
+            self.logger.info(
+                "step_complete step=%s output=%s", step.step_id, output_path
+            )
 
         if result.failed_step_id is None and not result.quit_requested:
             try:
@@ -245,6 +283,7 @@ class WorkflowRunner:
                 )
             except Exception as error:
                 message = f"Index generation failed: {error}"
+                self.logger.error("step_failure step=index error=%s", redact_secrets(error))
                 self._fail(result, "index", message)
 
             result.index_paths = {
@@ -262,8 +301,14 @@ class WorkflowRunner:
             self._save_state_safely(state, state_path)
             for warning in result.index_warnings:
                 print(f"[index] Warning: {warning}")
+                self.logger.warning("index_warning message=%s", warning)
             print(f"[index] Wrote {index_result.readme_path}")
             print(f"[index] Wrote {index_result.project_context_path}")
+            self.logger.info(
+                "workflow_complete completed_steps=%s status=%s",
+                len(result.completed_step_ids),
+                state.workflow_status,
+            )
 
         return result
 
@@ -380,6 +425,11 @@ class WorkflowRunner:
     def _validate_generated_markdown(self, step: WorkflowStep, content: str) -> None:
         validation = self.output_validator(content, step.required_sections)
         if not validation["is_valid"]:
+            self.logger.error(
+                "validation_failure step=%s errors=%s",
+                step.step_id,
+                "; ".join(validation["errors"]),
+            )
             raise WorkflowRunError(
                 f"Invalid generated Markdown for {step.step_id}: "
                 + "; ".join(validation["errors"])
@@ -400,12 +450,13 @@ class WorkflowRunner:
         prompt = self.prompt_loader(step.prompt_template_path, context)
         generated_markdown = self.llm_client.generate(prompt)
         self._validate_generated_markdown(step, generated_markdown)
-        return self.markdown_writer(
+        output_path = self.markdown_writer(
             output_directory,
             step.output_path,
             generated_markdown,
             overwrite,
         )
+        return output_path
 
     def _review_step_if_needed(
         self,
@@ -548,15 +599,23 @@ class WorkflowRunner:
         if not warnings:
             return
         if self.fail_on_warnings:
+            self.logger.error(
+                "validation_failure step=%s warnings=%s",
+                step.step_id,
+                "; ".join(warnings),
+            )
             raise WorkflowRunError(
                 f"Validation warnings for {step.step_id}: " + "; ".join(warnings)
             )
         for warning in warnings:
             print(f"[{step.step_id}] Warning: {warning}")
+            self.logger.warning("validation_warning step=%s message=%s", step.step_id, warning)
 
     def _fail(
         self, result: WorkflowRunResult, step_id: str, message: str
     ) -> None:
         result.failed_step_id = step_id
         result.errors.append(message)
-        raise WorkflowRunError(message)
+        safe_message = redact_secrets(message)
+        self.logger.error("workflow_failure step=%s error=%s", step_id, safe_message)
+        raise WorkflowRunError(safe_message)

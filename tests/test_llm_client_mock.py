@@ -1,8 +1,11 @@
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 from scripts.llm_client import FakeLLMClient, LLMClientError, OpenAILLMClient
+from scripts.logger import setup_workflow_logging
 
 
 class FakeResponses:
@@ -158,6 +161,33 @@ class OpenAILLMClientTests(unittest.TestCase):
 
         self.assertEqual(result, "# Retried\n\nGenerated")
         self.assertEqual(len(provider.responses.calls), 2)
+
+    def test_timeout_retry_is_logged(self):
+        os.environ["OPENAI_API_KEY"] = "test-key"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            logger, log_path = setup_workflow_logging(Path(temp_dir), console=False)
+            provider = FakeOpenAIProvider(
+                responses=[
+                    APITimeoutError("temporary timeout"),
+                    SimpleNamespace(output_text="# Retried\n\nGenerated"),
+                ]
+            )
+            client = OpenAILLMClient(
+                config={
+                    "llm": {
+                        "model": "test-model",
+                        "max_retries": 1,
+                        "retry_delay_seconds": 0,
+                    }
+                },
+                openai_client=provider,
+                env_loader=lambda: None,
+                logger=logger,
+            )
+
+            client.generate("rendered prompt")
+
+            self.assertIn("llm_retry", log_path.read_text(encoding="utf-8"))
 
     def test_empty_provider_response_fails(self):
         os.environ["OPENAI_API_KEY"] = "test-key"

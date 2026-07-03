@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from typing import Any, Union
 
+from scripts.logger import get_workflow_logger
+
 
 PathValue = Union[str, Path]
 
@@ -153,6 +155,10 @@ def validate_markdown_file(
 def _result(
     path: Any, is_valid: bool, errors: list[str], warnings: list[str]
 ) -> dict[str, Any]:
+    if not is_valid:
+        logger = get_workflow_logger()
+        if logger.handlers:
+            logger.error("validation_failure path=%s errors=%s", path, "; ".join(errors))
     return {
         "is_valid": is_valid,
         "path": str(path),

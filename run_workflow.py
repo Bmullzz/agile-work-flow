@@ -8,6 +8,7 @@ from pathlib import Path
 
 from scripts.config_loader import load_config
 from scripts.llm_client import FakeLLMClient, LLMClientError, OpenAILLMClient
+from scripts.logger import redact_secrets, setup_workflow_logging
 from scripts.workflow_runner import WorkflowRunError, WorkflowRunner
 from scripts.workflow_steps import WORKFLOW_STEPS, get_single_step, get_steps_from
 
@@ -97,10 +98,10 @@ def select_workflow_steps(args: argparse.Namespace):
     return WORKFLOW_STEPS
 
 
-def create_llm_client(args: argparse.Namespace, config: dict):
+def create_llm_client(args: argparse.Namespace, config: dict, logger=None):
     if args.mock_llm:
         return FakeLLMClient()
-    return OpenAILLMClient(config)
+    return OpenAILLMClient(config, logger=logger)
 
 
 def main() -> None:
@@ -110,16 +111,24 @@ def main() -> None:
     except KeyError as error:
         raise SystemExit(str(error)) from error
     print_runtime_options(args, len(selected_steps))
+    logger, log_path = setup_workflow_logging(args.output)
+    logger.info("cli_start config=%s input=%s output=%s", args.config, args.input, args.output)
+    logger.info("log_file path=%s", log_path)
 
-    config = load_config(args.config)
+    try:
+        config = load_config(args.config)
+    except Exception as error:
+        logger.error("workflow_failure step=config error=%s", redact_secrets(error))
+        raise SystemExit(str(error)) from error
     config.setdefault("output", {})["overwrite"] = args.overwrite
     if args.review:
         config.setdefault("workflow", {})["default_review"] = True
     if args.no_review:
         config.setdefault("workflow", {})["default_review"] = False
     try:
-        llm_client = create_llm_client(args, config)
+        llm_client = create_llm_client(args, config, logger=logger)
     except LLMClientError as error:
+        logger.error("workflow_failure step=llm_client error=%s", redact_secrets(error))
         raise SystemExit(str(error)) from error
 
     runner = WorkflowRunner(
@@ -138,6 +147,7 @@ def main() -> None:
             review=None,
         )
     except WorkflowRunError as error:
+        logger.error("workflow_failure step=workflow error=%s", redact_secrets(error))
         raise SystemExit(str(error)) from error
 
     print()
