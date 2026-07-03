@@ -1,3 +1,23 @@
-input_file: input/app-idea.md
-output_dir: output
-prompts_dir: prompts
+llm:
+  provider: openai
+  model: gpt-4.1-mini
+  temperature: 0.2
+  max_retries: 2
+  timeout_seconds: 60
+
+workflow:
+  default_review: true
+  resume_enabled: true
+  steps:
+    - discover
+    - plan
+    - write
+
+output:
+  format: markdown
+  create_run_directory: true
+  overwrite: false
+
+prompts:
+  directory: prompts
+  extension: .md
