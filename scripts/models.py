@@ -44,6 +44,22 @@ class WorkflowStep:
             self.blocks_step_ids, "blocks_step_ids"
         )
 
+    def to_dict(self) -> dict:
+        return {
+            "step_number": self.step_number,
+            "step_id": self.step_id,
+            "name": self.name,
+            "prompt_template_path": str(self.prompt_template_path),
+            "output_path": str(self.output_path),
+            "depends_on_step_ids": list(self.depends_on_step_ids),
+            "required_sections": list(self.required_sections),
+            "blocks_step_ids": list(self.blocks_step_ids),
+            "status": self.status,
+            "review_status": self.review_status,
+            "can_skip": self.can_skip,
+            "stale": self.stale,
+        }
+
 
 def _require_non_empty_string(value: str, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
