@@ -291,6 +291,7 @@ class WorkflowRunner:
             result.index_paths = {
                 "README": index_result.readme_path,
                 "PROJECT_CONTEXT": index_result.project_context_path,
+                "PROMPT_INDEX": index_result.prompt_index_path,
                 "ASSUMPTIONS": index_result.assumptions_path,
                 "OPEN_QUESTIONS": index_result.open_questions_path,
                 "WORKFLOW_STATE": index_result.workflow_state_path,

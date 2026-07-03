@@ -31,6 +31,7 @@ EXPECTED_OUTPUT_FILES = [
     "06-agent-prompts/11-coding-agent-optimized-stories.md",
     "06-agent-prompts/12-coding-agent-prompts.md",
     "06-agent-prompts/13-project-setup-prompt.md",
+    "06-agent-prompts/prompt-index.md",
     "07-quality/14-qa-validation-plan.md",
     "08-documentation/15-documentation-plan.md",
 ]
@@ -76,8 +77,11 @@ class EndToEndMockWorkflowTests(unittest.TestCase):
         self.assertTrue(
             (self.output_root / "99-meta" / "state" / "workflow-state.json").is_file()
         )
+        self.assertTrue((self.output_root / "06-agent-prompts" / "by-story").is_dir())
+        self.assertTrue((self.output_root / "06-agent-prompts" / "by-phase").is_dir())
         readme = (self.output_root / "README.md").read_text(encoding="utf-8")
         self.assertIn("Recommended Implementation Path", readme)
+        self.assertIn("06-agent-prompts/prompt-index.md", readme)
         self.assertIn("06-agent-prompts/12-coding-agent-prompts.md", readme)
 
     def test_full_mock_workflow_is_deterministic(self):

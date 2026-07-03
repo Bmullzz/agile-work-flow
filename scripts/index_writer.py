@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import Any, Iterable
 
 from scripts.markdown_writer import write_markdown
@@ -15,6 +16,9 @@ from scripts.models import WorkflowStep
 class IndexWriteResult:
     readme_path: Path
     project_context_path: Path
+    prompt_index_path: Path | None = None
+    prompt_by_story_paths: list[Path] = field(default_factory=list)
+    prompt_by_phase_paths: list[Path] = field(default_factory=list)
     assumptions_path: Path | None = None
     open_questions_path: Path | None = None
     workflow_state_path: Path | None = None
@@ -22,6 +26,19 @@ class IndexWriteResult:
     validation_report_path: Path | None = None
     changelog_path: Path | None = None
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _PromptPackageResult:
+    index_path: Path
+    by_story_paths: list[Path] = field(default_factory=list)
+    by_phase_paths: list[Path] = field(default_factory=list)
+
+
+@dataclass
+class _PromptSection:
+    title: str
+    content: str
 
 
 class IndexWriteError(RuntimeError):
@@ -49,6 +66,7 @@ class IndexWriter:
                 warnings.append(f"Missing optional output skipped: {step.output_path}")
 
         try:
+            prompt_package = self._write_prompt_package(output_directory, steps, warnings)
             readme_path = write_markdown(
                 output_directory,
                 "README.md",
@@ -151,6 +169,9 @@ class IndexWriter:
         return IndexWriteResult(
             readme_path=readme_path,
             project_context_path=project_context_path,
+            prompt_index_path=prompt_package.index_path,
+            prompt_by_story_paths=prompt_package.by_story_paths,
+            prompt_by_phase_paths=prompt_package.by_phase_paths,
             assumptions_path=assumptions_path,
             open_questions_path=open_questions_path,
             workflow_state_path=workflow_state_path,
@@ -191,6 +212,8 @@ class IndexWriter:
                 [
                     "## Coding-Agent Prompts",
                     "",
+                    "- [Prompt Index](06-agent-prompts/prompt-index.md)",
+                    "- [Project Setup Prompt](06-agent-prompts/13-project-setup-prompt.md) - run this first",
                     f"- [Coding-Agent Prompts]({_markdown_link(coding_agent_step.output_path)})",
                     "",
                 ]
@@ -221,6 +244,277 @@ class IndexWriter:
                 lines.append(f"- {warning}")
             lines.append("")
 
+        return "\n".join(lines)
+
+    def _write_prompt_package(
+        self,
+        output_directory: Path,
+        workflow_steps: list[WorkflowStep],
+        warnings: list[str],
+    ) -> "_PromptPackageResult":
+        agent_prompt_directory = output_directory / "06-agent-prompts"
+        by_story_directory = agent_prompt_directory / "by-story"
+        by_phase_directory = agent_prompt_directory / "by-phase"
+        by_story_directory.mkdir(parents=True, exist_ok=True)
+        by_phase_directory.mkdir(parents=True, exist_ok=True)
+
+        setup_step = _find_step(workflow_steps, "13-project-setup-prompt")
+        combined_step = _find_step(workflow_steps, "12-coding-agent-prompts")
+        optimized_stories_step = _find_step(
+            workflow_steps, "11-coding-agent-optimized-stories"
+        )
+        technical_stories_step = _find_step(workflow_steps, "07-technical-stories")
+        dependency_analysis_step = _find_step(workflow_steps, "09-dependency-analysis")
+
+        combined_prompt_path = (
+            output_directory / combined_step.output_path if combined_step else None
+        )
+        combined_prompt_content = ""
+        if combined_prompt_path is not None and combined_prompt_path.exists():
+            combined_prompt_content = combined_prompt_path.read_text(encoding="utf-8")
+        elif combined_step is not None:
+            warnings.append(
+                "Missing combined coding-agent prompt file; prompt splitting skipped."
+            )
+
+        by_story_paths = self._write_story_prompt_files(
+            output_directory,
+            combined_prompt_content,
+            combined_step,
+        )
+        prompt_entries = self._prompt_entries_from_story_paths(
+            output_directory,
+            by_story_paths,
+            technical_stories_step,
+            dependency_analysis_step,
+        )
+        by_phase_paths = self._write_phase_prompt_files(output_directory, prompt_entries)
+
+        index_path = write_markdown(
+            output_directory,
+            "06-agent-prompts/prompt-index.md",
+            self._render_prompt_index(
+                setup_step=setup_step,
+                combined_step=combined_step,
+                optimized_stories_step=optimized_stories_step,
+                technical_stories_step=technical_stories_step,
+                dependency_analysis_step=dependency_analysis_step,
+                prompt_entries=prompt_entries,
+            ),
+            overwrite=True,
+            frontmatter=_frontmatter(
+                "Coding-Agent Prompt Index",
+                "06-agent-prompts/prompt-index",
+                "agent_prompt_index",
+                workflow_step="12-coding-agent-prompts",
+                depends_on=[
+                    step.step_id
+                    for step in (
+                        setup_step,
+                        combined_step,
+                        optimized_stories_step,
+                        technical_stories_step,
+                        dependency_analysis_step,
+                    )
+                    if step is not None
+                ],
+                tags=["ai-agile/agent-prompts", "ai-agile/index"],
+            ),
+        )
+        return _PromptPackageResult(
+            index_path=index_path,
+            by_story_paths=by_story_paths,
+            by_phase_paths=by_phase_paths,
+        )
+
+    def _write_story_prompt_files(
+        self,
+        output_directory: Path,
+        combined_prompt_content: str,
+        combined_step: WorkflowStep | None,
+    ) -> list[Path]:
+        if not combined_prompt_content.strip() or combined_step is None:
+            return []
+        sections = _split_prompt_sections(combined_prompt_content)
+        paths = []
+        for index, section in enumerate(sections, start=1):
+            story_id = _story_id_from_title(section.title, index)
+            prompt_path = write_markdown(
+                output_directory,
+                f"06-agent-prompts/by-story/{story_id}.md",
+                section.content,
+                overwrite=True,
+                frontmatter=_frontmatter(
+                    section.title,
+                    f"06-agent-prompts/by-story/{story_id}",
+                    "agent_prompt",
+                    workflow_step=combined_step.step_id,
+                    depends_on=list(combined_step.depends_on_step_ids),
+                    tags=["ai-agile/agent-prompts", "ai-agile/by-story"],
+                ),
+            )
+            paths.append(prompt_path)
+        return paths
+
+    def _prompt_entries_from_story_paths(
+        self,
+        output_directory: Path,
+        by_story_paths: list[Path],
+        technical_stories_step: WorkflowStep | None,
+        dependency_analysis_step: WorkflowStep | None,
+    ) -> list[dict[str, str]]:
+        entries = []
+        for index, path in enumerate(by_story_paths, start=1):
+            story_id = path.stem
+            phase = _phase_from_story_id(story_id, index)
+            dependencies = []
+            if dependency_analysis_step is not None:
+                dependencies.append(_source_link(dependency_analysis_step.output_path))
+            source = (
+                _source_link(technical_stories_step.output_path)
+                if technical_stories_step is not None
+                else "technical stories"
+            )
+            entries.append(
+                {
+                    "order": str(index + 1),
+                    "story_id": story_id,
+                    "phase": phase,
+                    "dependencies": ", ".join(dependencies) or "none",
+                    "source": source,
+                    "path": _markdown_link(
+                        path.relative_to(output_directory / "06-agent-prompts")
+                    ),
+                }
+            )
+        return entries
+
+    def _write_phase_prompt_files(
+        self, output_directory: Path, prompt_entries: list[dict[str, str]]
+    ) -> list[Path]:
+        entries_by_phase: dict[str, list[dict[str, str]]] = {}
+        for entry in prompt_entries:
+            entries_by_phase.setdefault(entry["phase"], []).append(entry)
+
+        phase_paths = []
+        for phase in sorted(entries_by_phase):
+            phase_paths.append(
+                write_markdown(
+                    output_directory,
+                    f"06-agent-prompts/by-phase/{phase}.md",
+                    self._render_phase_prompt_file(phase, entries_by_phase[phase]),
+                    overwrite=True,
+                    frontmatter=_frontmatter(
+                        f"Coding-Agent Prompts {phase}",
+                        f"06-agent-prompts/by-phase/{phase}",
+                        "agent_prompt_phase",
+                        workflow_step="12-coding-agent-prompts",
+                        tags=["ai-agile/agent-prompts", "ai-agile/by-phase"],
+                    ),
+                )
+            )
+        return phase_paths
+
+    def _render_phase_prompt_file(
+        self, phase: str, prompt_entries: list[dict[str, str]]
+    ) -> str:
+        lines = [
+            f"# Coding-Agent Prompts {phase}",
+            "",
+            "Run these prompts in order for this phase.",
+            "",
+        ]
+        for entry in prompt_entries:
+            lines.append(f"- [{entry['story_id']}](../{entry['path']})")
+        lines.append("")
+        return "\n".join(lines)
+
+    def _render_prompt_index(
+        self,
+        setup_step: WorkflowStep | None,
+        combined_step: WorkflowStep | None,
+        optimized_stories_step: WorkflowStep | None,
+        technical_stories_step: WorkflowStep | None,
+        dependency_analysis_step: WorkflowStep | None,
+        prompt_entries: list[dict[str, str]],
+    ) -> str:
+        lines = [
+            "# Coding-Agent Prompt Index",
+            "",
+            "Use this index to run implementation prompts in dependency order.",
+            "",
+            "## Execution Order",
+            "",
+        ]
+        if setup_step is not None:
+            lines.append(
+                f"1. [Project Setup Prompt]({_agent_prompt_link(setup_step.output_path)}) - run this first"
+            )
+        else:
+            lines.append("1. Project setup prompt missing - create project scaffolding first.")
+        if prompt_entries:
+            for entry in prompt_entries:
+                lines.append(
+                    f"{entry['order']}. [{entry['story_id']}]({entry['path']}) - {entry['phase']}"
+                )
+        elif combined_step is not None:
+            lines.append(
+                f"2. [Combined Coding-Agent Prompts]({_agent_prompt_link(combined_step.output_path)})"
+            )
+        else:
+            lines.append("2. Combined coding-agent prompt file missing.")
+
+        lines.extend(["", "## Prompt Map", ""])
+        if setup_step is not None:
+            lines.extend(
+                [
+                    "| Order | Prompt | Phase | Dependencies | Source Technical Story |",
+                    "| --- | --- | --- | --- | --- |",
+                    f"| 1 | [project-setup]({_agent_prompt_link(setup_step.output_path)}) | setup | none | project setup |",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "| Order | Prompt | Phase | Dependencies | Source Technical Story |",
+                    "| --- | --- | --- | --- | --- |",
+                    "| 1 | project-setup missing | setup | none | project setup |",
+                ]
+            )
+        for entry in prompt_entries:
+            lines.append(
+                "| {order} | [{story_id}]({path}) | {phase} | {dependencies} | {source} |".format(
+                    **entry
+                )
+            )
+        if not prompt_entries and combined_step is not None:
+            source = (
+                _source_link(technical_stories_step.output_path)
+                if technical_stories_step is not None
+                else "technical stories"
+            )
+            dependencies = (
+                _source_link(dependency_analysis_step.output_path)
+                if dependency_analysis_step is not None
+                else "none"
+            )
+            lines.append(
+                f"| 2 | [combined-prompts]({_agent_prompt_link(combined_step.output_path)}) | implementation | {dependencies} | {source} |"
+            )
+
+        lines.extend(["", "## Source Documents", ""])
+        for label, step in (
+            ("Optimized Stories", optimized_stories_step),
+            ("Technical Stories", technical_stories_step),
+            ("Dependency Analysis", dependency_analysis_step),
+            ("Combined Prompts", combined_step),
+        ):
+            if step is not None:
+                lines.append(f"- [{label}]({_source_link(step.output_path)})")
+        lines.extend(["", "## Folders", ""])
+        lines.append("- [By Story](by-story/)")
+        lines.append("- [By Phase](by-phase/)")
+        lines.append("")
         return "\n".join(lines)
 
     def _render_project_context(
@@ -406,6 +700,96 @@ def _find_step(workflow_steps: list[WorkflowStep], step_id: str) -> WorkflowStep
 
 def _markdown_link(path: Path) -> str:
     return path.as_posix()
+
+
+def _agent_prompt_link(path: Path) -> str:
+    path = Path(path)
+    parts = path.parts
+    if parts and parts[0] == "06-agent-prompts":
+        return Path(*parts[1:]).as_posix()
+    return path.as_posix()
+
+
+def _source_link(path: Path) -> str:
+    return "../" + Path(path).as_posix()
+
+
+def _split_prompt_sections(content: str) -> list[_PromptSection]:
+    markdown = _strip_yaml_frontmatter(content).strip()
+    matches = list(re.finditer(r"^(#{2,3})\s+(.+?)\s*$", markdown, flags=re.MULTILINE))
+    if not matches:
+        return []
+
+    sections: list[_PromptSection] = []
+    prompt_heading_matches = [
+        match for match in matches if _is_prompt_section_heading(match.group(2))
+    ]
+    for match in prompt_heading_matches:
+        start = match.start()
+        end = _prompt_section_end(markdown, matches, match)
+        section_content = markdown[start:end].strip()
+        if section_content:
+            sections.append(
+                _PromptSection(
+                    title=match.group(2).strip().rstrip("#").strip(),
+                    content=section_content,
+                )
+            )
+    return sections
+
+
+def _prompt_section_end(
+    markdown: str, heading_matches: list[re.Match[str]], current_match: re.Match[str]
+) -> int:
+    current_level = len(current_match.group(1))
+    for candidate in heading_matches:
+        if candidate.start() <= current_match.start():
+            continue
+        candidate_level = len(candidate.group(1))
+        if _is_prompt_section_heading(candidate.group(2)) or candidate_level <= current_level:
+            return candidate.start()
+    return len(markdown)
+
+
+def _is_prompt_section_heading(title: str) -> bool:
+    return bool(_story_identifier_match(title))
+
+
+def _strip_yaml_frontmatter(content: str) -> str:
+    if not content.startswith("---"):
+        return content
+    match = re.match(r"^---\s*\n.*?\n---\s*\n?", content, flags=re.DOTALL)
+    if not match:
+        return content
+    return content[match.end() :]
+
+
+def _story_id_from_title(title: str, index: int) -> str:
+    identifier_match = _story_identifier_match(title)
+    if identifier_match:
+        return _slugify(identifier_match.group(1))
+    return f"{index:03d}-{_slugify(title)}"
+
+
+def _story_identifier_match(title: str) -> re.Match[str] | None:
+    return re.search(
+        r"\b((?:story|us|ts|task|prompt)[-_ ]?\d+[a-z0-9-]*)\b",
+        title,
+        flags=re.IGNORECASE,
+    )
+
+
+def _phase_from_story_id(story_id: str, index: int) -> str:
+    phase_match = re.search(r"phase[-_ ]?(\d+)", story_id, flags=re.IGNORECASE)
+    if phase_match:
+        return f"phase-{int(phase_match.group(1)):02d}"
+    phase_number = ((index - 1) // 5) + 1
+    return f"phase-{phase_number:02d}"
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "prompt"
 
 
 def _frontmatter(
