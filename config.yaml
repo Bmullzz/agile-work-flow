@@ -1,3 +1,10 @@
+generation:
+  backend: openai_api
+
+backends:
+  openai_api: {}
+  mock: {}
+
 llm:
   provider: openai
   model: gpt-4.1-mini

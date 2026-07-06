@@ -13,6 +13,13 @@ REQUIRED_SECTIONS = ("llm", "workflow", "output", "prompts")
 SECRET_KEY_NAMES = {"api_key", "apikey", "openai_api_key", "secret", "token"}
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "generation": {
+        "backend": "openai_api",
+    },
+    "backends": {
+        "openai_api": {},
+        "mock": {},
+    },
     "llm": {
         "provider": "openai",
         "model": "gpt-4.1-mini",

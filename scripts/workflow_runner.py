@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from scripts.context_builder import build_context
+from scripts.backends.base import GenerationBackend
 from scripts.index_writer import IndexWriter
 from scripts.logger import get_workflow_logger, redact_secrets, setup_workflow_logging
-from scripts.llm_client import LLMClient
 from scripts.markdown_writer import write_markdown
 from scripts.models import WorkflowStep
 from scripts.prompt_loader import render_prompt_file
@@ -66,7 +66,8 @@ class WorkflowRunner:
         workflow_steps: list[WorkflowStep],
         prompt_loader: PromptRenderer = render_prompt_file,
         context_builder: ContextBuilder = build_context,
-        llm_client: LLMClient | None = None,
+        generation_backend: GenerationBackend | None = None,
+        llm_client: Any | None = None,
         markdown_writer: MarkdownWriter = write_markdown,
         input_validator: InputValidator = validate_input_file,
         output_validator: OutputValidator = validate_markdown_content,
@@ -74,14 +75,14 @@ class WorkflowRunner:
         review_gate: ReviewGate | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
-        if llm_client is None:
-            raise ValueError("llm_client is required.")
+        if generation_backend is None and llm_client is None:
+            raise ValueError("generation_backend is required.")
 
         self.config = config or {}
         self.workflow_steps = list(workflow_steps)
         self.prompt_loader = prompt_loader
         self.context_builder = context_builder
-        self.llm_client = llm_client
+        self.generation_backend = generation_backend or _LLMClientBackendAdapter(llm_client)
         self.markdown_writer = markdown_writer
         self.input_validator = input_validator
         self.output_validator = output_validator
@@ -457,7 +458,11 @@ class WorkflowRunner:
             step, input_file, output_directory, completed_steps
         )
         prompt = self.prompt_loader(step.prompt_template_path, context)
-        generated_markdown = self.llm_client.generate(prompt)
+        generated_markdown = self.generation_backend.generate(
+            step=step,
+            prompt=prompt,
+            context=context,
+        )
         self._validate_generated_markdown(step, generated_markdown)
         output_path = self.markdown_writer(
             output_directory,
@@ -648,3 +653,13 @@ class WorkflowRunner:
         safe_message = redact_secrets(message)
         self.logger.error("workflow_failure step=%s error=%s", step_id, safe_message)
         raise WorkflowRunError(safe_message)
+
+
+class _LLMClientBackendAdapter:
+    """Adapter for legacy clients that expose generate(prompt)."""
+
+    def __init__(self, llm_client: Any) -> None:
+        self.llm_client = llm_client
+
+    def generate(self, step: Any, prompt: str, context: dict[str, Any]) -> str:
+        return self.llm_client.generate(prompt)

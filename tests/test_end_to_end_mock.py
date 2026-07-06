@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.llm_client import FakeLLMClient
+from scripts.backends.mock_backend import MockGenerationBackend
 from scripts.workflow_runner import WorkflowRunner
 from scripts.workflow_steps import WORKFLOW_STEPS
 
@@ -59,7 +59,7 @@ class EndToEndMockWorkflowTests(unittest.TestCase):
         runner = WorkflowRunner(
             config={"workflow": {"stop_on_failure": True}, "output": {"overwrite": False}},
             workflow_steps=WORKFLOW_STEPS,
-            llm_client=FakeLLMClient(),
+            generation_backend=MockGenerationBackend(),
         )
 
         result = runner.run(self.input_path, self.output_root)
@@ -99,7 +99,7 @@ class EndToEndMockWorkflowTests(unittest.TestCase):
         runner = WorkflowRunner(
             config={"workflow": {"stop_on_failure": True}, "output": {"overwrite": False}},
             workflow_steps=WORKFLOW_STEPS,
-            llm_client=FakeLLMClient(),
+            generation_backend=MockGenerationBackend(),
         )
         runner.run(input_path, output_root)
 

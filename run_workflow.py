@@ -6,8 +6,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from scripts.backends.base import GenerationBackendError
+from scripts.backends.mock_backend import MockGenerationBackend
+from scripts.backends.openai_api_backend import OpenAIAPIBackend
 from scripts.config_loader import load_config
-from scripts.llm_client import FakeLLMClient, LLMClientError, OpenAILLMClient
 from scripts.logger import redact_secrets, setup_workflow_logging
 from scripts.workflow_runner import WorkflowRunError, WorkflowRunner
 from scripts.workflow_steps import WORKFLOW_STEPS, get_single_step, get_steps_from
@@ -98,10 +100,23 @@ def select_workflow_steps(args: argparse.Namespace):
     return WORKFLOW_STEPS
 
 
-def create_llm_client(args: argparse.Namespace, config: dict, logger=None):
+def create_generation_backend(args: argparse.Namespace, config: dict, logger=None):
     if args.mock_llm:
-        return FakeLLMClient()
-    return OpenAILLMClient(config, logger=logger)
+        return MockGenerationBackend()
+
+    backend_name = (
+        config.get("generation", {}).get("backend")
+        or config.get("llm", {}).get("provider")
+        or "openai_api"
+    )
+    if backend_name in {"openai", "openai_api"}:
+        return OpenAIAPIBackend(config, logger=logger)
+    if backend_name in {"mock", "mock_backend"}:
+        return MockGenerationBackend()
+    raise GenerationBackendError(
+        f"Unknown generation backend '{backend_name}'. "
+        "Supported backends: openai_api, mock."
+    )
 
 
 def main() -> None:
@@ -126,15 +141,15 @@ def main() -> None:
     if args.no_review:
         config.setdefault("workflow", {})["default_review"] = False
     try:
-        llm_client = create_llm_client(args, config, logger=logger)
-    except LLMClientError as error:
-        logger.error("workflow_failure step=llm_client error=%s", redact_secrets(error))
+        generation_backend = create_generation_backend(args, config, logger=logger)
+    except GenerationBackendError as error:
+        logger.error("workflow_failure step=generation_backend error=%s", redact_secrets(error))
         raise SystemExit(str(error)) from error
 
     runner = WorkflowRunner(
         config=config,
         workflow_steps=WORKFLOW_STEPS,
-        llm_client=llm_client,
+        generation_backend=generation_backend,
     )
 
     try:

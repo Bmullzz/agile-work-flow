@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts.backends.base import GenerationBackend
 from scripts.llm_client import FakeLLMClient
 from scripts.models import WorkflowStep
 from scripts.review_gate import ReviewDecision
@@ -34,6 +35,16 @@ class SequencedLLMClient:
         self.prompts.append(prompt)
         self.count += 1
         return f"# Generated {self.count}\n\nContent"
+
+
+class RecordingGenerationBackend(GenerationBackend):
+    def __init__(self, response: str = "# Generated\n\nContent"):
+        self.calls = []
+        self.response = response
+
+    def generate(self, step, prompt, context):
+        self.calls.append((step, prompt, context))
+        return self.response
 
 
 class ScriptedReviewGate:
@@ -143,7 +154,7 @@ class WorkflowRunnerTests(unittest.TestCase):
     def test_runner_calls_prompt_loader_context_builder_llm_and_writes_output(self):
         prompt_calls = []
         context_calls = []
-        llm_client = RecordingLLMClient("# Generated\n\nOutput")
+        generation_backend = RecordingGenerationBackend("# Generated\n\nOutput")
 
         def prompt_loader(path, context):
             prompt_calls.append((path, context))
@@ -158,14 +169,18 @@ class WorkflowRunnerTests(unittest.TestCase):
             workflow_steps=[self.make_steps()[0]],
             prompt_loader=prompt_loader,
             context_builder=context_builder,
-            llm_client=llm_client,
+            generation_backend=generation_backend,
         )
 
         result = runner.run(self.input_path, self.output_root)
 
         self.assertEqual(len(prompt_calls), 1)
         self.assertEqual(context_calls, ["00-first"])
-        self.assertEqual(llm_client.prompts, ["# Rendered Prompt"])
+        self.assertEqual(len(generation_backend.calls), 1)
+        backend_step, backend_prompt, backend_context = generation_backend.calls[0]
+        self.assertEqual(backend_step.step_id, "00-first")
+        self.assertEqual(backend_prompt, "# Rendered Prompt")
+        self.assertEqual(backend_context, {"APP_IDEA": "idea", "PROJECT_CONTEXT": ""})
         self.assertTrue(result.output_paths["00-first"].exists())
         self.assertIn(
             'document_id: "00-first"',
