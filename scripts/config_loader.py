@@ -102,6 +102,8 @@ def _validate_no_secrets(value: Any, path: tuple[str, ...] = ()) -> None:
 
 def _deep_update(base: dict[str, Any], overrides: dict[str, Any]) -> None:
     for key, value in overrides.items():
+        if value is None and isinstance(base.get(key), dict):
+            continue
         if isinstance(value, dict) and isinstance(base.get(key), dict):
             _deep_update(base[key], value)
         else:

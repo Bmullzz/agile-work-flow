@@ -92,6 +92,41 @@ class OpenAIAPIBackendTests(unittest.TestCase):
         self.assertEqual(provider.responses.calls[0]["temperature"], 0.4)
         self.assertEqual(provider.responses.calls[0]["timeout"], 12)
 
+    def test_empty_openai_api_backend_config_uses_llm_defaults(self):
+        os.environ["OPENAI_API_KEY"] = "test-key"
+        provider = FakeOpenAIProvider()
+        backend = OpenAIAPIBackend(
+            config={
+                "llm": {
+                    "model": "llm-model",
+                    "temperature": 0.3,
+                    "timeout_seconds": 15,
+                    "max_retries": 0,
+                },
+                "backends": {"openai_api": None},
+            },
+            openai_client=provider,
+            env_loader=lambda: None,
+        )
+
+        backend.generate(step=self.step, prompt="rendered prompt", context={})
+
+        self.assertEqual(provider.responses.calls[0]["model"], "llm-model")
+        self.assertEqual(provider.responses.calls[0]["temperature"], 0.3)
+        self.assertEqual(provider.responses.calls[0]["timeout"], 15)
+
+    def test_non_mapping_openai_api_backend_config_fails_clearly(self):
+        os.environ["OPENAI_API_KEY"] = "test-key"
+
+        with self.assertRaises(GenerationBackendError) as error:
+            OpenAIAPIBackend(
+                config={"backends": {"openai_api": "bad"}},
+                openai_client=FakeOpenAIProvider(),
+                env_loader=lambda: None,
+            )
+
+        self.assertIn("backends.openai_api", str(error.exception))
+
     def test_provider_error_handling_does_not_log_api_key(self):
         os.environ["OPENAI_API_KEY"] = "secret-test-key"
         provider = FakeOpenAIProvider(error=BadRequestError("bad secret-test-key"))

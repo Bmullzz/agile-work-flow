@@ -106,9 +106,20 @@ class OpenAIAPIBackend(GenerationBackend):
 
 
 def _openai_config(config: dict[str, Any]) -> dict[str, Any]:
-    backends_config = config.get("backends", {})
-    openai_api_config = backends_config.get("openai_api", {})
-    llm_config = config.get("llm", {})
+    backends_config = config.get("backends") or {}
+    if not isinstance(backends_config, dict):
+        raise GenerationBackendError("Config section 'backends' must be a mapping.")
+
+    openai_api_config = backends_config.get("openai_api") or {}
+    if not isinstance(openai_api_config, dict):
+        raise GenerationBackendError(
+            "Config section 'backends.openai_api' must be a mapping."
+        )
+
+    llm_config = config.get("llm") or {}
+    if not isinstance(llm_config, dict):
+        raise GenerationBackendError("Config section 'llm' must be a mapping.")
+
     merged = dict(llm_config)
     merged.update(openai_api_config)
     return merged

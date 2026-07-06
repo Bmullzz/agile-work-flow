@@ -88,6 +88,26 @@ prompts: {}
         self.assertFalse(config["output"]["overwrite"])
         self.assertEqual(config["prompts"]["extension"], ".md")
 
+    def test_empty_backend_override_section_loads_as_defaultable_value(self):
+        config_path = self.write_config(
+            """
+generation:
+  backend: openai_api
+backends:
+  openai_api:
+llm:
+  model: test-model
+workflow: {}
+output: {}
+prompts: {}
+"""
+        )
+
+        config = load_config(config_path)
+
+        self.assertEqual(config["backends"]["openai_api"], {})
+        self.assertEqual(config["llm"]["model"], "test-model")
+
     def test_secrets_are_not_allowed_in_yaml(self):
         config_path = self.write_config(
             """
