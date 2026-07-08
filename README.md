@@ -176,15 +176,15 @@ Generated documents include YAML frontmatter for Markdown tools such as Obsidian
 
 - [Setup](docs/01_setup.md)
 - [Usage](docs/02_usage.md)
-- [Backend Modes](docs/backend-modes.md)
-- [Manual ChatGPT Mode](docs/manual-chatgpt-mode.md)
-- [Codex Mode](docs/codex-mode.md)
-- [Configuration](docs/configuration.md)
-- [Workflow](docs/04_workflow.md)
-- [Review Mode](docs/05_review-mode.md)
-- [Testing](docs/06_testing.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Developer Guide](docs/08_developer-guide.md)
+- [Backend Modes](docs/03_backend-modes.md)
+- [Manual ChatGPT Mode](docs/04_manual-chatgpt-mode.md)
+- [Codex Mode](docs/05_codex-mode.md)
+- [Configuration](docs/06_configuration.md)
+- [Workflow](docs/07_workflow.md)
+- [Review Mode](docs/08_review-mode.md)
+- [Testing](docs/09_testing.md)
+- [Troubleshooting](docs/10_troubleshooting.md)
+- [Developer Guide](docs/11_developer-guide.md)
 
 ## Repository Structure
 
