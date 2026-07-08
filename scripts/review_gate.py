@@ -86,6 +86,9 @@ class ReviewGate:
         self, path: Path, required_sections: list[str] | None
     ) -> dict:
         try:
-            return self.validator(path, required_sections)
+            return self.validator(path, required_sections, backend_name="review")
         except TypeError:
-            return self.validator(path)
+            try:
+                return self.validator(path, required_sections)
+            except TypeError:
+                return self.validator(path)

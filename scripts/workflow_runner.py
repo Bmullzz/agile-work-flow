@@ -40,7 +40,7 @@ ContextBuilder = Callable[
 ]
 MarkdownWriter = Callable[..., Path]
 InputValidator = Callable[[Path], dict[str, Any]]
-OutputValidator = Callable[[str, Optional[list[str]]], dict[str, Any]]
+OutputValidator = Callable[..., dict[str, Any]]
 
 
 class WorkflowRunError(RuntimeError):
@@ -441,7 +441,13 @@ class WorkflowRunner:
         raise WorkflowRunError(f"Unknown workflow step ID: {step_id}")
 
     def _validate_generated_markdown(self, step: WorkflowStep, content: str) -> None:
-        validation = self.output_validator(content, step.required_sections)
+        backend_name = getattr(self.generation_backend, "backend_name", None)
+        validation = self._run_output_validator(
+            content,
+            step.required_sections,
+            expected_h1=step.name if backend_name in {"manual_chatgpt", "codex"} else None,
+            backend_name=backend_name,
+        )
         if not validation["is_valid"]:
             self.logger.error(
                 "validation_failure step=%s errors=%s",
@@ -470,6 +476,8 @@ class WorkflowRunner:
         context.update(
             {
                 "OUTPUT_ROOT": str(output_directory),
+                "EXPECTED_H1": step.name,
+                "REQUIRED_SECTIONS": list(step.required_sections),
                 "PENDING_PROMPT_PATH": str(
                     output_directory / self._manual_prompt_dir() / f"{step.step_id}.prompt.md"
                 ),
@@ -756,10 +764,33 @@ class WorkflowRunner:
             content = output_path.read_text(encoding="utf-8")
         except OSError:
             return False
-        validation = self.output_validator(content, step.required_sections)
+        backend_name = getattr(self.generation_backend, "backend_name", None)
+        validation = self._run_output_validator(
+            content,
+            step.required_sections,
+            expected_h1=step.name if backend_name in {"manual_chatgpt", "codex"} else None,
+            backend_name=backend_name,
+        )
         if not validation["is_valid"]:
             return False
         return not (self.fail_on_warnings and validation["warnings"])
+
+    def _run_output_validator(
+        self,
+        content: str,
+        required_sections: list[str] | None,
+        expected_h1: str | None = None,
+        backend_name: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return self.output_validator(
+                content,
+                required_sections,
+                expected_h1=expected_h1,
+                backend_name=backend_name,
+            )
+        except TypeError:
+            return self.output_validator(content, required_sections)
 
     def _handle_validation_warnings(
         self, step: WorkflowStep, warnings: list[str]

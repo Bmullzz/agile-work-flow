@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from scripts.backends.base import GenerationBackend, GenerationBackendError
 from scripts.file_utils import ensure_directory, read_markdown_file, write_text_file
-from scripts.validators import validate_non_empty_text
+from scripts.validators import validate_markdown_content
 
 
 class ManualChatGPTBackend(GenerationBackend):
@@ -64,13 +64,21 @@ class ManualChatGPTBackend(GenerationBackend):
                 f"Manual ChatGPT response file could not be read: {response_path}"
             ) from error
 
-        validation = validate_non_empty_text(
+        validation = validate_markdown_content(
             response_content,
-            label="Manual ChatGPT response file",
+            required_sections=list(getattr(step, "required_sections", []) or []),
+            expected_h1=context.get("EXPECTED_H1"),
+            backend_name=self.backend_name,
         )
         if not validation["is_valid"]:
+            if any("empty" in error.lower() for error in validation["errors"]):
+                raise GenerationBackendError(
+                    f"Manual ChatGPT response file is empty: {response_path}"
+                )
             raise GenerationBackendError(
-                f"Manual ChatGPT response file is empty: {response_path}"
+                "Manual ChatGPT response failed validation:\n- "
+                + "\n- ".join(validation["errors"])
+                + f"\nPlease edit the response file and try again: {response_path}"
             )
         return response_content
 

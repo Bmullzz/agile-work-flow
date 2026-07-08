@@ -7,6 +7,7 @@ from typing import Any
 
 from scripts.backends.base import GenerationBackend, GenerationBackendError
 from scripts.codex_task_writer import CodexTaskWriter
+from scripts.validators import validate_expected_output_path
 
 
 class CodexBackend(GenerationBackend):
@@ -34,6 +35,18 @@ class CodexBackend(GenerationBackend):
         target_output_path = context.get("TARGET_OUTPUT_PATH")
         if not target_output_path:
             target_output_path = Path(output_root) / getattr(step, "output_path")
+        expected_output_path = Path(output_root) / getattr(step, "output_path")
+        path_validation = validate_expected_output_path(
+            target_output_path,
+            expected_output_path,
+            output_root=output_root,
+            backend_name=self.backend_name,
+        )
+        if not path_validation["is_valid"]:
+            raise GenerationBackendError(
+                "Codex task target failed validation:\n- "
+                + "\n- ".join(path_validation["errors"])
+            )
 
         overwrite = bool(context.get("OVERWRITE", False))
         result = self.writer.write_task_packet(
@@ -53,11 +66,11 @@ def _render_export_marker(step: Any, task_directory: Path, target_output_path: s
     required_sections = list(getattr(step, "required_sections", []) or [])
     rendered_sections: set[str] = set()
     lines = [
-        f"# Codex Task Exported: {getattr(step, 'name', 'Workflow Step')}",
+        f"# {getattr(step, 'name', 'Workflow Step')}",
         "",
         "## Summary",
         "",
-        "A Codex-ready task packet was exported for manual execution.",
+        "Codex Task Exported. A Codex-ready task packet was exported for manual execution.",
         "",
         "## Codex Task Packet",
         "",

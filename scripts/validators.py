@@ -79,29 +79,56 @@ def validate_input_file(path: PathValue) -> dict[str, Any]:
 def validate_markdown_content(
     content: str,
     required_sections: list[str] | None = None,
+    expected_h1: str | None = None,
+    backend_name: str | None = None,
+    allow_full_document_code_fence: bool = False,
 ) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
+    label = _validation_label(backend_name)
 
     if content is None or not content.strip():
-        errors.append("Generated Markdown is empty.")
+        errors.append(f"{label} is empty.")
         return _result(path=None, is_valid=False, errors=errors, warnings=warnings)
 
     stripped = _strip_yaml_frontmatter(content).lstrip()
+    if _is_full_document_code_fence(stripped) and not allow_full_document_code_fence:
+        errors.append(
+            f"{label} must not wrap the entire document in a fenced code block."
+        )
+
+    preamble = _detect_chat_preamble(stripped)
+    if preamble:
+        errors.append(f'{label} contains chat preamble: "{preamble}"')
+
     if not stripped.startswith("#"):
-        errors.append("Generated Markdown must start with a heading.")
+        errors.append(f"{label} must start with a Markdown heading.")
+
+    if expected_h1:
+        first_h1 = _first_h1(stripped)
+        if first_h1 is None:
+            errors.append(f"{label} must start with H1 heading: # {expected_h1}")
+        elif not _heading_matches(first_h1, expected_h1):
+            errors.append(
+                f"{label} must start with expected H1 '# {expected_h1}'. "
+                f"Found '# {first_h1}'."
+            )
 
     if required_sections:
         missing_sections = _missing_sections(content, required_sections)
         if missing_sections:
             errors.append(
-                "Generated Markdown is missing required sections: "
+                f"{label} is missing required sections: "
                 + ", ".join(missing_sections)
             )
 
     warnings.extend(_detect_open_question_warnings(content))
-    if "{{" in content or "}}" in content:
-        warnings.append("Generated Markdown contains unresolved placeholder markers.")
+    leaked_placeholders = _detect_unresolved_placeholders(content)
+    if leaked_placeholders:
+        errors.append(
+            f"{label} contains unresolved placeholder markers: "
+            + ", ".join(leaked_placeholders)
+        )
 
     return _result(path=None, is_valid=not errors, errors=errors, warnings=warnings)
 
@@ -120,7 +147,11 @@ def validate_generated_markdown(
 
 
 def validate_markdown_file(
-    path: PathValue, required_sections: list[str] | None = None
+    path: PathValue,
+    required_sections: list[str] | None = None,
+    expected_h1: str | None = None,
+    backend_name: str | None = None,
+    allow_full_document_code_fence: bool = False,
 ) -> dict[str, Any]:
     try:
         file_path = _as_path(path)
@@ -154,9 +185,45 @@ def validate_markdown_file(
     except OSError as error:
         return _result(file_path, False, [f"Markdown file could not be read: {error}"], [])
 
-    result = validate_markdown_content(content, required_sections=required_sections)
+    result = validate_markdown_content(
+        content,
+        required_sections=required_sections,
+        expected_h1=expected_h1,
+        backend_name=backend_name,
+        allow_full_document_code_fence=allow_full_document_code_fence,
+    )
     result["path"] = str(file_path)
     return result
+
+
+def validate_expected_output_path(
+    path: PathValue,
+    expected_path: PathValue,
+    output_root: PathValue | None = None,
+    backend_name: str | None = None,
+) -> dict[str, Any]:
+    errors: list[str] = []
+    label = _validation_label(backend_name)
+    try:
+        actual = _as_path(path).resolve(strict=False)
+        expected = _as_path(expected_path).resolve(strict=False)
+    except ValueError as error:
+        return _result(path=path, is_valid=False, errors=[str(error)], warnings=[])
+
+    if actual != expected:
+        errors.append(
+            f"{label} output path does not match expected workflow output. "
+            f"Expected: {expected_path}. Got: {path}."
+        )
+
+    if output_root is not None:
+        root = _as_path(output_root).resolve(strict=False)
+        try:
+            actual.relative_to(root)
+        except ValueError:
+            errors.append(f"{label} output path must stay inside output root: {path}")
+
+    return _result(path=path, is_valid=not errors, errors=errors, warnings=[])
 
 
 def _result(
@@ -241,6 +308,61 @@ def _strip_yaml_frontmatter(content: str) -> str:
     if not match:
         return content
     return content[match.end() :]
+
+
+def _validation_label(backend_name: str | None) -> str:
+    if backend_name == "manual_chatgpt":
+        return "Manual ChatGPT response"
+    if backend_name == "codex":
+        return "Codex output"
+    if backend_name:
+        return f"{backend_name} output"
+    return "Generated Markdown"
+
+
+def _is_full_document_code_fence(content: str) -> bool:
+    stripped = content.strip()
+    if not stripped.startswith("```"):
+        return False
+    match = re.match(r"^```[^\n]*\n.*\n```\s*$", stripped, flags=re.DOTALL)
+    if not match:
+        return False
+    return len(re.findall(r"^\s*```", stripped, flags=re.MULTILINE)) == 2
+
+
+def _detect_chat_preamble(content: str) -> str | None:
+    first_line = ""
+    for line in content.splitlines():
+        if line.strip():
+            first_line = line.strip()
+            break
+    if not first_line:
+        return None
+
+    patterns = [
+        r"^sure,\s+here\s+is\b.*",
+        r"^sure,\s+here's\b.*",
+        r"^i\s+can\s+help\s+with\s+that\b.*",
+        r"^here(?:'s| is)\s+the\s+markdown\b.*",
+        r"^here(?:'s| is)\s+.*\bmarkdown\b.*",
+    ]
+    for pattern in patterns:
+        if re.match(pattern, first_line, flags=re.IGNORECASE):
+            return first_line[:120]
+    return None
+
+
+def _first_h1(content: str) -> str | None:
+    for line in _strip_code_fences(content).splitlines():
+        match = re.match(r"^\s{0,3}#\s+(.+?)\s*$", line)
+        if match:
+            return match.group(1).strip().rstrip("#").strip()
+    return None
+
+
+def _detect_unresolved_placeholders(content: str) -> list[str]:
+    placeholders = sorted(set(re.findall(r"\{\{\s*([A-Z0-9_]+)\s*\}\}", content)))
+    return [f"{{{{{placeholder}}}}}" for placeholder in placeholders]
 
 
 def _heading_matches(heading: str, expected: str) -> bool:

@@ -73,6 +73,21 @@ class CodexBackendTests(unittest.TestCase):
 
         self.assertIn("OUTPUT_ROOT", str(error.exception))
 
+    def test_target_output_path_mismatch_fails_validation(self):
+        with self.assertRaises(GenerationBackendError) as error:
+            CodexBackend().generate(
+                step=self.step,
+                prompt="# Rendered Prompt",
+                context={
+                    "APP_IDEA": "Build a workflow tool.",
+                    "OUTPUT_ROOT": str(self.output_root),
+                    "TARGET_OUTPUT_PATH": str(self.output_root / "wrong.md"),
+                },
+            )
+
+        self.assertIn("target failed validation", str(error.exception))
+        self.assertIn("does not match expected", str(error.exception))
+
     def test_existing_task_packet_requires_overwrite(self):
         context = {
             "APP_IDEA": "Build a workflow tool.",

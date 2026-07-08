@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from scripts.validators import (
+    validate_expected_output_path,
     validate_input_file,
     validate_markdown_content,
     validate_markdown_file,
@@ -184,6 +185,54 @@ Create a command line planning assistant that reads an app concept and writes us
         self.assertTrue(result["is_valid"])
         self.assertEqual(result["errors"], [])
         self.assertTrue(any("# App Idea" in warning for warning in result["warnings"]))
+
+    def test_expected_h1_mismatch_fails(self):
+        result = validate_markdown_content(
+            "# Wrong Title\n\n## Overview\n\nContent.",
+            required_sections=["Overview"],
+            expected_h1="Product Vision",
+            backend_name="manual_chatgpt",
+        )
+
+        self.assertFalse(result["is_valid"])
+        self.assertTrue(any("expected H1" in error for error in result["errors"]))
+
+    def test_chat_preamble_fails(self):
+        result = validate_markdown_content(
+            "Sure, here is the Markdown you requested.\n\n# Product Vision\n\nContent.",
+            backend_name="manual_chatgpt",
+        )
+
+        self.assertFalse(result["is_valid"])
+        self.assertTrue(any("chat preamble" in error for error in result["errors"]))
+
+    def test_full_document_code_fence_fails(self):
+        result = validate_markdown_content(
+            "```markdown\n# Product Vision\n\n## Overview\n\nContent.\n```",
+            backend_name="manual_chatgpt",
+        )
+
+        self.assertFalse(result["is_valid"])
+        self.assertTrue(any("fenced code block" in error for error in result["errors"]))
+
+    def test_unresolved_placeholders_fail(self):
+        result = validate_markdown_content(
+            "# Product Vision\n\n## Overview\n\nUse {{APP_IDEA}} and {{TECH_STACK}}.",
+        )
+
+        self.assertFalse(result["is_valid"])
+        self.assertTrue(any("{{APP_IDEA}}" in error for error in result["errors"]))
+
+    def test_expected_output_path_mismatch_fails(self):
+        result = validate_expected_output_path(
+            self.root / "wrong.md",
+            self.root / "expected.md",
+            output_root=self.root,
+            backend_name="codex",
+        )
+
+        self.assertFalse(result["is_valid"])
+        self.assertTrue(any("does not match" in error for error in result["errors"]))
 
 
 if __name__ == "__main__":

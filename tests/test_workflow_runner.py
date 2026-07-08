@@ -229,7 +229,7 @@ class WorkflowRunnerTests(unittest.TestCase):
         backend = MetadataGenerationBackend(
             "manual_chatgpt",
             "manual_import",
-            "# Generated\n\nOutput",
+            "# First\n\nOutput",
         )
         runner = WorkflowRunner(
             config={},
@@ -264,7 +264,7 @@ class WorkflowRunnerTests(unittest.TestCase):
         backend = MetadataGenerationBackend(
             "codex",
             "task_export",
-            "# Generated\n\nOutput",
+            "# First\n\nOutput",
         )
         runner = WorkflowRunner(
             config={"backends": {"codex": {"task_export_dir": "custom/codex-tasks"}}},
