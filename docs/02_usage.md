@@ -16,20 +16,40 @@ Required flags:
 Use mock mode for offline development, tests, and smoke checks:
 
 ```bash
-python run_workflow.py --input input/app-idea.md --output output/mock-project --mock-llm
+python run_workflow.py --input input/app-idea.md --output output/mock-project --backend mock
 ```
 
-`FakeLLMClient` returns deterministic Markdown and does not require API keys or network access.
+`--mock-llm` is still available as a shortcut. Mock mode returns deterministic Markdown and does not require API keys or network access.
 
-## Real LLM Mode
+## OpenAI API Mode
 
-Set `OPENAI_API_KEY` in the environment or `.env`, then omit `--mock-llm`:
+Set `OPENAI_API_KEY` in the environment or `.env`, then run:
 
 ```bash
-python run_workflow.py --input input/app-idea.md --output output/my-project
+python run_workflow.py --input input/app-idea.md --output output/my-project --backend openai-api
 ```
 
 Model, retry, and timeout settings come from `config.yaml`.
+
+## Manual ChatGPT Mode
+
+Manual ChatGPT mode exports a prompt file, waits for you to paste the prompt into ChatGPT, then imports the Markdown response from the expected response file.
+
+```bash
+python run_workflow.py --input input/app-idea.md --output output/manual-project --backend manual-chatgpt --review
+```
+
+Prompt exports are written under `99-meta/pending-prompts/`. Manual responses are read from `99-meta/manual-responses/`.
+
+## Codex Task Export Mode
+
+Codex mode exports self-contained task packets and does not run the Codex CLI automatically.
+
+```bash
+python run_workflow.py --input input/app-idea.md --output output/codex-project --backend codex
+```
+
+Task packets are written under `99-meta/codex-tasks/`.
 
 ## Review Mode
 

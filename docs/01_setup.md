@@ -47,7 +47,7 @@ python -m unittest
 Run the workflow without API calls:
 
 ```bash
-python run_workflow.py --input input/app-idea.md --output output/mock-project --mock-llm
+python run_workflow.py --input input/app-idea.md --output output/mock-project --backend mock
 ```
 
 The mock run should create Markdown output files, indexes, workflow state, and `logs/workflow.log`.

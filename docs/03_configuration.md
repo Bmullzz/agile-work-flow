@@ -1,70 +1,38 @@
 # Configuration
 
-Runtime settings live in `config.yaml`. Secrets live in environment variables or `.env`.
+The current configuration reference is maintained at [configuration.md](configuration.md).
 
-## Current Defaults
+Key points:
+
+- `generation.backend` selects the default backend.
+- `--backend` overrides config for one run.
+- `OPENAI_API_KEY` is required only for `openai_api`.
+- Manual ChatGPT, Codex task export, and mock mode are API-free.
+- Backend-specific settings live under `backends`.
+
+Minimal backend config:
 
 ```yaml
-llm:
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.2
-  max_retries: 2
-  retry_delay_seconds: 0
-  timeout_seconds: 60
+generation:
+  backend: openai_api
 
-workflow:
-  default_review: false
-  resume_enabled: true
-  stop_on_failure: true
-  fail_on_warnings: false
+backends:
+  openai_api:
+    enabled: true
+    max_output_tokens: 4000
 
-output:
-  format: markdown
-  create_run_directory: true
-  overwrite: false
+  manual_chatgpt:
+    enabled: true
+    prompt_export_dir: 99-meta/pending-prompts
+    response_import_dir: 99-meta/manual-responses
 
-prompts:
-  directory: prompts
-  extension: .md
+  codex:
+    enabled: true
+    task_export_dir: 99-meta/codex-tasks
+    mode: export_only
+
+  mock:
+    enabled: true
 ```
 
-## Required Sections
-
-The config loader requires these top-level sections:
-
-- `llm`
-- `workflow`
-- `output`
-- `prompts`
-
-Missing sections, invalid YAML, or secret-like keys fail early.
-
-## LLM Settings
-
-- `llm.provider`: currently `openai`
-- `llm.model`: OpenAI model name
-- `llm.temperature`: generation temperature
-- `llm.max_retries`: retry count for temporary provider failures
-- `llm.retry_delay_seconds`: delay between retries
-- `llm.timeout_seconds`: provider request timeout
-
-## Workflow Settings
-
-- `workflow.default_review`: enables review gates by default
-- `workflow.resume_enabled`: reserved for resume behavior
-- `workflow.stop_on_failure`: stops the run on the first failed step when true
-- `workflow.fail_on_warnings`: treats Markdown validation warnings as blocking when true
-
-## Output Settings
-
-- `output.format`: currently Markdown
-- `output.create_run_directory`: reserved for run directory behavior
-- `output.overwrite`: default overwrite behavior, overridden by `--overwrite`
-
-## Prompt Settings
-
-- `prompts.directory`: prompt template directory
-- `prompts.extension`: prompt template extension
-
-Prompt templates are Markdown files under `prompts/` and use simple placeholders such as `{{APP_IDEA}}`, `{{PRODUCT_VISION}}`, and `{{TECHNICAL_STORIES}}`.
+OpenAI model, retry, timeout, and temperature settings remain under `llm`.

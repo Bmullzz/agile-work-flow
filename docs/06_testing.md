@@ -6,7 +6,7 @@
 python -m unittest
 ```
 
-The suite uses `FakeLLMClient` and does not require API keys or network access.
+The suite uses mock generation backends and mocked provider calls. It does not require API keys or network access.
 
 ## Focused Test Commands
 
@@ -21,7 +21,7 @@ python -m unittest tests.test_review_gate
 ## Mock Smoke Run
 
 ```bash
-python run_workflow.py --input input/app-idea.md --output output/mock-project --mock-llm --overwrite
+python run_workflow.py --input input/app-idea.md --output output/mock-project --backend mock --overwrite
 ```
 
 Expected results:
@@ -35,7 +35,7 @@ Expected results:
 ## Real LLM Smoke Run
 
 ```bash
-OPENAI_API_KEY=your_api_key_here python run_workflow.py --input input/app-idea.md --output output/real-project --overwrite
+OPENAI_API_KEY=your_api_key_here python run_workflow.py --input input/app-idea.md --output output/real-project --backend openai-api --overwrite
 ```
 
 Use a small test idea first. Real runs make API calls and may incur provider cost.

@@ -76,7 +76,7 @@ The splitter only creates individual story prompt files for headings with implem
 Before handing changes to another developer or coding agent:
 
 1. Run `python -m unittest`.
-2. Run a mock workflow with `--mock-llm --overwrite`.
+2. Run a mock workflow with `--backend mock --overwrite`.
 3. Check generated `README.md`, `project-context.md`, and `prompt-index.md`.
 4. Inspect `logs/workflow.log` for unexpected failures.
 5. Confirm no secrets are committed.

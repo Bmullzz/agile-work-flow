@@ -23,7 +23,7 @@ python run_workflow.py --input input/app-idea.md --output output/mock-project --
 Run with the real OpenAI-backed client:
 
 ```bash
-OPENAI_API_KEY=your_api_key_here python run_workflow.py --input input/app-idea.md --output output/my-project
+OPENAI_API_KEY=your_api_key_here python run_workflow.py --input input/app-idea.md --output output/my-project --backend openai-api
 ```
 
 You can also put `OPENAI_API_KEY` in a local `.env` file. Secrets are not read from `config.yaml`.
@@ -31,18 +31,18 @@ You can also put `OPENAI_API_KEY` in a local `.env` file. Secrets are not read f
 Run with manual ChatGPT prompt export and response import:
 
 ```bash
-python run_workflow.py --input input/app-idea.md --output output/manual-project
+python run_workflow.py --input input/app-idea.md --output output/manual-project --backend manual-chatgpt --review
 ```
 
-Set `generation.backend: manual_chatgpt` in `config.yaml` first. This mode does not require `OPENAI_API_KEY`.
+This mode does not require `OPENAI_API_KEY`.
 
 Run with Codex task packet export:
 
 ```bash
-python run_workflow.py --input input/app-idea.md --output output/codex-project
+python run_workflow.py --input input/app-idea.md --output output/codex-project --backend codex
 ```
 
-Set `generation.backend: codex` in `config.yaml` first. This mode exports self-contained task packets and does not require `OPENAI_API_KEY`.
+This mode exports self-contained task packets and does not require `OPENAI_API_KEY`.
 
 ## CLI Usage
 
@@ -77,8 +77,6 @@ generation:
 backends:
   openai_api:
     enabled: true
-    model: gpt-4.1-mini
-    temperature: 0.2
     max_output_tokens: 4000
 
   manual_chatgpt:
@@ -116,7 +114,9 @@ The terminal then tells you where to save the ChatGPT response:
 output/my-project/99-meta/manual-responses/<step-id>.response.md
 ```
 
-Paste the prompt into ChatGPT, save the Markdown response at that path, then press Enter in the terminal. The backend imports the response, checks that it is not empty, and the normal workflow validation and output writer continue from there.
+Paste the prompt into ChatGPT, save the Markdown response at that path, then press Enter in the terminal. The backend imports the response and validates it before the normal workflow output writer continues.
+
+Manual responses must start with the expected H1, include required sections, avoid chat preambles such as `Sure, here is...`, avoid unresolved `{{PLACEHOLDER}}` markers, and avoid wrapping the whole document in a fenced code block.
 
 ## Codex Export Mode
 
@@ -174,14 +174,17 @@ Generated documents include YAML frontmatter for Markdown tools such as Obsidian
 
 ## Documentation
 
-- [Setup](docs/setup.md)
-- [Usage](docs/usage.md)
+- [Setup](docs/01_setup.md)
+- [Usage](docs/02_usage.md)
+- [Backend Modes](docs/backend-modes.md)
+- [Manual ChatGPT Mode](docs/manual-chatgpt-mode.md)
+- [Codex Mode](docs/codex-mode.md)
 - [Configuration](docs/configuration.md)
-- [Workflow](docs/workflow.md)
-- [Review Mode](docs/review-mode.md)
-- [Testing](docs/testing.md)
+- [Workflow](docs/04_workflow.md)
+- [Review Mode](docs/05_review-mode.md)
+- [Testing](docs/06_testing.md)
 - [Troubleshooting](docs/troubleshooting.md)
-- [Developer Guide](docs/developer-guide.md)
+- [Developer Guide](docs/08_developer-guide.md)
 
 ## Repository Structure
 
