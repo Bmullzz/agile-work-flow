@@ -281,6 +281,7 @@ class WorkflowRunner:
                     run_metadata={
                         "generated_at": "not recorded",
                         "completed_steps": len(result.completed_step_ids),
+                        "codex_task_export_dir": self._codex_task_dir().as_posix(),
                         "workflow_state": state.to_dict(),
                     },
                 )
@@ -462,19 +463,13 @@ class WorkflowRunner:
             {
                 "OUTPUT_ROOT": str(output_directory),
                 "PENDING_PROMPT_PATH": str(
-                    output_directory
-                    / "99-meta"
-                    / "pending-prompts"
-                    / f"{step.step_id}.prompt.md"
+                    output_directory / self._manual_prompt_dir() / f"{step.step_id}.prompt.md"
                 ),
                 "MANUAL_RESPONSE_PATH": str(
-                    output_directory
-                    / "99-meta"
-                    / "manual-responses"
-                    / f"{step.step_id}.response.md"
+                    output_directory / self._manual_response_dir() / f"{step.step_id}.response.md"
                 ),
                 "CODEX_TASK_PATH": str(
-                    output_directory / "99-meta" / "codex-tasks" / step.step_id
+                    output_directory / self._codex_task_dir() / step.step_id
                 ),
                 "TARGET_OUTPUT_PATH": str(output_directory / step.output_path),
                 "OVERWRITE": overwrite,
@@ -495,6 +490,33 @@ class WorkflowRunner:
             frontmatter=self._frontmatter_for_step(step, review_enabled),
         )
         return output_path
+
+    def _manual_prompt_dir(self) -> Path:
+        return Path(
+            self._backend_config("manual_chatgpt")
+            .get("prompt_export_dir", "99-meta/pending-prompts")
+        )
+
+    def _manual_response_dir(self) -> Path:
+        return Path(
+            self._backend_config("manual_chatgpt")
+            .get("response_import_dir", "99-meta/manual-responses")
+        )
+
+    def _codex_task_dir(self) -> Path:
+        return Path(
+            self._backend_config("codex")
+            .get("task_export_dir", "99-meta/codex-tasks")
+        )
+
+    def _backend_config(self, backend_name: str) -> dict[str, Any]:
+        backends_config = self.config.get("backends") or {}
+        if not isinstance(backends_config, dict):
+            return {}
+        backend_config = backends_config.get(backend_name) or {}
+        if not isinstance(backend_config, dict):
+            return {}
+        return backend_config
 
     def _frontmatter_for_step(
         self, step: WorkflowStep, review_enabled: bool

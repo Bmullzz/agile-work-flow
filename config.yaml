@@ -2,10 +2,22 @@ generation:
   backend: openai_api
 
 backends:
-  openai_api: {}
-  mock: {}
-  manual_chatgpt: {}
-  codex: {}
+  openai_api:
+    enabled: true
+    max_output_tokens: 4000
+
+  manual_chatgpt:
+    enabled: true
+    prompt_export_dir: 99-meta/pending-prompts
+    response_import_dir: 99-meta/manual-responses
+
+  codex:
+    enabled: true
+    task_export_dir: 99-meta/codex-tasks
+    mode: export_only
+
+  mock:
+    enabled: true
 
 llm:
   provider: openai

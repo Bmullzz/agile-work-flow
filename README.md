@@ -17,7 +17,7 @@ python -m unittest
 Run the full workflow offline with deterministic mock output:
 
 ```bash
-python run_workflow.py --input input/app-idea.md --output output/mock-project --mock-llm
+python run_workflow.py --input input/app-idea.md --output output/mock-project --backend mock
 ```
 
 Run with the real OpenAI-backed client:
@@ -56,13 +56,44 @@ Common options:
 
 ```bash
 python run_workflow.py --input input/app-idea.md --output output/my-project --mock-llm
+python run_workflow.py --input input/app-idea.md --output output/my-project --backend openai-api
+python run_workflow.py --input input/app-idea.md --output output/my-project --backend manual-chatgpt
+python run_workflow.py --input input/app-idea.md --output output/my-project --backend codex
+python run_workflow.py --input input/app-idea.md --output output/my-project --backend mock
 python run_workflow.py --input input/app-idea.md --output output/my-project --review
 python run_workflow.py --input input/app-idea.md --output output/my-project --resume
 python run_workflow.py --input input/app-idea.md --output output/my-project --from-step 07-technical-stories --overwrite
 python run_workflow.py --input input/app-idea.md --output output/my-project --step 03-system-architecture --overwrite
 ```
 
-Use `--mock-llm` for local testing without network access or API keys. Omit it for real OpenAI generation.
+Use `--backend` to override `generation.backend` from `config.yaml`. Backend aliases are normalized internally, so `openai-api` maps to `openai_api` and `manual-chatgpt` maps to `manual_chatgpt`. `--mock-llm` remains a shortcut for `--backend mock`.
+
+Backend configuration:
+
+```yaml
+generation:
+  backend: openai_api
+
+backends:
+  openai_api:
+    enabled: true
+    model: gpt-4.1-mini
+    temperature: 0.2
+    max_output_tokens: 4000
+
+  manual_chatgpt:
+    enabled: true
+    prompt_export_dir: 99-meta/pending-prompts
+    response_import_dir: 99-meta/manual-responses
+
+  codex:
+    enabled: true
+    task_export_dir: 99-meta/codex-tasks
+    mode: export_only
+
+  mock:
+    enabled: true
+```
 
 ## Manual ChatGPT Mode
 

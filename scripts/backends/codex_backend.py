@@ -12,8 +12,13 @@ from scripts.codex_task_writer import CodexTaskWriter
 class CodexBackend(GenerationBackend):
     """Export each workflow step as a Codex-ready task packet."""
 
-    def __init__(self, writer: CodexTaskWriter | None = None) -> None:
+    def __init__(
+        self,
+        writer: CodexTaskWriter | None = None,
+        task_directory: str | Path | None = None,
+    ) -> None:
         self.writer = writer or CodexTaskWriter()
+        self.task_directory = Path(task_directory or "99-meta/codex-tasks")
 
     def generate(self, step: Any, prompt: str, context: dict[str, Any]) -> str:
         if prompt is None or not str(prompt).strip():
@@ -34,6 +39,7 @@ class CodexBackend(GenerationBackend):
             prompt=prompt,
             context=context,
             target_output_path=target_output_path,
+            task_export_dir=self.task_directory,
             overwrite=overwrite,
         )
 

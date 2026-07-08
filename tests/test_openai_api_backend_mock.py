@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from scripts.backends.base import GenerationBackendError
 from scripts.backends.openai_api_backend import OpenAIAPIBackend
+from scripts.config_loader import load_config
 from scripts.logger import setup_workflow_logging
 from scripts.models import WorkflowStep
 
@@ -74,6 +75,7 @@ class OpenAIAPIBackendTests(unittest.TestCase):
                         "temperature": 0.4,
                         "timeout_seconds": 12,
                         "max_retries": 0,
+                        "max_output_tokens": 1234,
                     }
                 }
             },
@@ -91,6 +93,7 @@ class OpenAIAPIBackendTests(unittest.TestCase):
         self.assertEqual(provider.responses.calls[0]["model"], "backend-model")
         self.assertEqual(provider.responses.calls[0]["temperature"], 0.4)
         self.assertEqual(provider.responses.calls[0]["timeout"], 12)
+        self.assertEqual(provider.responses.calls[0]["max_output_tokens"], 1234)
 
     def test_empty_openai_api_backend_config_uses_llm_defaults(self):
         os.environ["OPENAI_API_KEY"] = "test-key"
@@ -114,6 +117,39 @@ class OpenAIAPIBackendTests(unittest.TestCase):
         self.assertEqual(provider.responses.calls[0]["model"], "llm-model")
         self.assertEqual(provider.responses.calls[0]["temperature"], 0.3)
         self.assertEqual(provider.responses.calls[0]["timeout"], 15)
+
+    def test_loaded_config_preserves_llm_model_over_backend_defaults(self):
+        os.environ["OPENAI_API_KEY"] = "test-key"
+        provider = FakeOpenAIProvider()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+            config_path.write_text(
+                """
+llm:
+  model: llm-custom-model
+  temperature: 0.7
+  timeout_seconds: 21
+  max_retries: 0
+workflow: {}
+output: {}
+prompts: {}
+""",
+                encoding="utf-8",
+            )
+            config = load_config(config_path)
+
+        backend = OpenAIAPIBackend(
+            config=config,
+            openai_client=provider,
+            env_loader=lambda: None,
+        )
+
+        backend.generate(step=self.step, prompt="rendered prompt", context={})
+
+        self.assertEqual(provider.responses.calls[0]["model"], "llm-custom-model")
+        self.assertEqual(provider.responses.calls[0]["temperature"], 0.7)
+        self.assertEqual(provider.responses.calls[0]["timeout"], 21)
+        self.assertEqual(provider.responses.calls[0]["max_output_tokens"], 4000)
 
     def test_non_mapping_openai_api_backend_config_fails_clearly(self):
         os.environ["OPENAI_API_KEY"] = "test-key"

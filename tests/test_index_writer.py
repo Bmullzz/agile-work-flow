@@ -101,6 +101,18 @@ class IndexWriterTests(unittest.TestCase):
         self.assertIn("(06-agent-prompts/prompt-index.md)", readme)
         self.assertIn("Coding-Agent Prompts", readme)
 
+    def test_readme_uses_custom_codex_task_export_dir(self):
+        IndexWriter().write_indexes(
+            self.output_root,
+            self.steps,
+            run_metadata={"codex_task_export_dir": "custom/codex-tasks"},
+        )
+
+        readme = (self.output_root / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("(custom/codex-tasks/)", readme)
+        self.assertNotIn("(99-meta/codex-tasks/)", readme)
+
     def test_prompt_index_is_created(self):
         result = IndexWriter().write_indexes(self.output_root, self.steps)
 

@@ -28,6 +28,7 @@ class OpenAIAPIBackend(GenerationBackend):
         self.max_retries = int(backend_config.get("max_retries", 2))
         self.retry_delay_seconds = float(backend_config.get("retry_delay_seconds", 0))
         self.timeout_seconds = float(backend_config.get("timeout_seconds", 60))
+        self.max_output_tokens = backend_config.get("max_output_tokens")
         self.logger = logger or get_workflow_logger()
 
         self._load_environment(env_loader)
@@ -55,6 +56,7 @@ class OpenAIAPIBackend(GenerationBackend):
                     input=prompt,
                     temperature=self.temperature,
                     timeout=self.timeout_seconds,
+                    **self._token_limit_kwargs(),
                 )
                 text = _extract_response_text(response)
                 if not text.strip():
@@ -103,6 +105,11 @@ class OpenAIAPIBackend(GenerationBackend):
             ) from error
 
         return OpenAI(api_key=self.api_key, timeout=self.timeout_seconds, max_retries=0)
+
+    def _token_limit_kwargs(self) -> dict[str, int]:
+        if self.max_output_tokens is None:
+            return {}
+        return {"max_output_tokens": int(self.max_output_tokens)}
 
 
 def _openai_config(config: dict[str, Any]) -> dict[str, Any]:

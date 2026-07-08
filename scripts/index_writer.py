@@ -56,6 +56,9 @@ class IndexWriter:
         steps = list(workflow_steps)
         metadata = run_metadata or {}
         warnings: list[str] = []
+        codex_task_export_dir = _metadata_path(
+            metadata, "codex_task_export_dir", "99-meta/codex-tasks"
+        )
 
         existing_steps = []
         for step in steps:
@@ -70,7 +73,12 @@ class IndexWriter:
             readme_path = write_markdown(
                 output_directory,
                 "README.md",
-                self._render_readme(existing_steps, metadata, warnings),
+                self._render_readme(
+                    existing_steps,
+                    metadata,
+                    warnings,
+                    codex_task_export_dir=codex_task_export_dir,
+                ),
                 overwrite=True,
                 frontmatter=_frontmatter(
                     "AI Agile Workflow Output",
@@ -186,6 +194,7 @@ class IndexWriter:
         workflow_steps: list[WorkflowStep],
         metadata: dict[str, Any],
         warnings: list[str],
+        codex_task_export_dir: str,
     ) -> str:
         lines = [
             "# AI Agile Workflow Output",
@@ -215,7 +224,7 @@ class IndexWriter:
                     "- [Prompt Index](06-agent-prompts/prompt-index.md)",
                     "- [Project Setup Prompt](06-agent-prompts/13-project-setup-prompt.md) - run this first",
                     f"- [Coding-Agent Prompts]({_markdown_link(coding_agent_step.output_path)})",
-                    "- [Codex Task Packets](99-meta/codex-tasks/)",
+                    f"- [Codex Task Packets]({codex_task_export_dir}/)",
                     "",
                 ]
             )
@@ -690,6 +699,11 @@ def _render_metadata(metadata: dict[str, Any]) -> list[str]:
         lines.append(f"- {key.replace('_', ' ').title()}: {metadata[key]}")
     lines.extend(["", ""])
     return lines
+
+
+def _metadata_path(metadata: dict[str, Any], key: str, default: str) -> str:
+    value = metadata.get(key) or default
+    return Path(str(value)).as_posix().rstrip("/")
 
 
 def _find_step(workflow_steps: list[WorkflowStep], step_id: str) -> WorkflowStep | None:

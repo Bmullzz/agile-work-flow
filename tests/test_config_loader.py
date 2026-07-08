@@ -105,8 +105,51 @@ prompts: {}
 
         config = load_config(config_path)
 
-        self.assertEqual(config["backends"]["openai_api"], {})
+        self.assertTrue(config["backends"]["openai_api"]["enabled"])
+        self.assertNotIn("model", config["backends"]["openai_api"])
+        self.assertNotIn("temperature", config["backends"]["openai_api"])
         self.assertEqual(config["llm"]["model"], "test-model")
+
+    def test_backend_defaults_are_applied(self):
+        config_path = self.write_config(
+            """
+generation:
+  backend: codex
+llm: {}
+workflow: {}
+output: {}
+prompts: {}
+"""
+        )
+
+        config = load_config(config_path)
+
+        self.assertEqual(config["generation"]["backend"], "codex")
+        self.assertTrue(config["backends"]["mock"]["enabled"])
+        self.assertEqual(
+            config["backends"]["manual_chatgpt"]["prompt_export_dir"],
+            "99-meta/pending-prompts",
+        )
+        self.assertEqual(
+            config["backends"]["codex"]["task_export_dir"],
+            "99-meta/codex-tasks",
+        )
+
+    def test_non_mapping_generation_section_fails(self):
+        config_path = self.write_config(
+            """
+generation: bad
+llm: {}
+workflow: {}
+output: {}
+prompts: {}
+"""
+        )
+
+        with self.assertRaises(ConfigError) as error:
+            load_config(config_path)
+
+        self.assertIn("generation", str(error.exception))
 
     def test_secrets_are_not_allowed_in_yaml(self):
         config_path = self.write_config(

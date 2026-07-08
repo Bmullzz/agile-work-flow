@@ -65,6 +65,20 @@ class CliParsingTests(unittest.TestCase):
         self.assertEqual(args.from_step, "backlog")
         self.assertEqual(args.step, "stories")
 
+    def test_backend_option_accepts_string_value(self):
+        args = parse_args(
+            [
+                "--input",
+                "input/app-idea.md",
+                "--output",
+                "output/my-project",
+                "--backend",
+                "manual-chatgpt",
+            ]
+        )
+
+        self.assertEqual(args.backend, "manual-chatgpt")
+
 
 if __name__ == "__main__":
     unittest.main()

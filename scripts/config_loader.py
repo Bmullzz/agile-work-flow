@@ -17,10 +17,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "backend": "openai_api",
     },
     "backends": {
-        "openai_api": {},
-        "mock": {},
-        "manual_chatgpt": {},
-        "codex": {},
+        "openai_api": {
+            "enabled": True,
+            "max_output_tokens": 4000,
+        },
+        "manual_chatgpt": {
+            "enabled": True,
+            "prompt_export_dir": "99-meta/pending-prompts",
+            "response_import_dir": "99-meta/manual-responses",
+        },
+        "codex": {
+            "enabled": True,
+            "task_export_dir": "99-meta/codex-tasks",
+            "mode": "export_only",
+        },
+        "mock": {
+            "enabled": True,
+        },
     },
     "llm": {
         "provider": "openai",
@@ -71,6 +84,7 @@ def load_config(path: Union[str, Path]) -> dict[str, Any]:
         raise ConfigError("Config file must contain a top-level mapping.")
 
     _validate_required_sections(raw_config)
+    _validate_optional_mapping_sections(raw_config)
     _validate_no_secrets(raw_config)
 
     config = deepcopy(DEFAULT_CONFIG)
@@ -83,6 +97,14 @@ def _validate_required_sections(config: dict[str, Any]) -> None:
         if section not in config:
             raise ConfigError(f"Missing required config section: {section}")
         if not isinstance(config[section], dict):
+            raise ConfigError(f"Config section '{section}' must be a mapping.")
+
+
+def _validate_optional_mapping_sections(config: dict[str, Any]) -> None:
+    for section in ("generation", "backends"):
+        if section in config and config[section] is not None and not isinstance(
+            config[section], dict
+        ):
             raise ConfigError(f"Config section '{section}' must be a mapping.")
 
 

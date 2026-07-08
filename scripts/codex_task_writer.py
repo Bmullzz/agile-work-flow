@@ -32,10 +32,11 @@ class CodexTaskWriter:
         prompt: str,
         context: dict[str, Any],
         target_output_path: str | Path,
+        task_export_dir: str | Path = "99-meta/codex-tasks",
         overwrite: bool = False,
     ) -> CodexTaskWriteResult:
         output_directory = Path(output_root)
-        task_directory = output_directory / "99-meta" / "codex-tasks" / step.step_id
+        task_directory = output_directory / Path(task_export_dir) / step.step_id
         ensure_directory(task_directory)
 
         target_path = Path(target_output_path)

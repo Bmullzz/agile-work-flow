@@ -49,6 +49,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Use mock LLM responses instead of real model calls.",
     )
     parser.add_argument(
+        "--backend",
+        help=(
+            "Generation backend override. Supported values: openai-api, "
+            "manual-chatgpt, codex, mock."
+        ),
+    )
+    parser.add_argument(
         "--review",
         action="store_true",
         help="Enable human review checkpoints.",
@@ -85,6 +92,7 @@ def print_runtime_options(args: argparse.Namespace, step_count: int) -> None:
     print(f"Input: {args.input.resolve()}")
     print(f"Output: {args.output.resolve()}")
     print(f"Mock LLM: {args.mock_llm}")
+    print(f"Backend: {args.backend}")
     print(f"Review: {args.review}")
     print(f"No review: {args.no_review}")
     print(f"Resume: {args.resume}")
@@ -104,25 +112,89 @@ def select_workflow_steps(args: argparse.Namespace):
 
 def create_generation_backend(args: argparse.Namespace, config: dict, logger=None):
     if args.mock_llm:
+        _ensure_backend_enabled("mock", config)
         return MockGenerationBackend()
 
-    backend_name = (
-        config.get("generation", {}).get("backend")
-        or config.get("llm", {}).get("provider")
-        or "openai_api"
-    )
-    if backend_name in {"openai", "openai_api"}:
+    backend_name = selected_backend_name(args, config)
+    _ensure_backend_enabled(backend_name, config)
+    backend_config = _backend_config(config, backend_name)
+
+    if backend_name == "openai_api":
         return OpenAIAPIBackend(config, logger=logger)
-    if backend_name in {"mock", "mock_backend"}:
+    if backend_name == "mock":
         return MockGenerationBackend()
-    if backend_name in {"manual_chatgpt", "chatgpt_manual", "manual"}:
-        return ManualChatGPTBackend()
-    if backend_name in {"codex", "codex_export", "codex_backend"}:
-        return CodexBackend()
+    if backend_name == "manual_chatgpt":
+        return ManualChatGPTBackend(
+            prompt_directory=backend_config.get(
+                "prompt_export_dir", "99-meta/pending-prompts"
+            ),
+            response_directory=backend_config.get(
+                "response_import_dir", "99-meta/manual-responses"
+            ),
+        )
+    if backend_name == "codex":
+        return CodexBackend(task_directory=backend_config.get("task_export_dir"))
     raise GenerationBackendError(
         f"Unknown generation backend '{backend_name}'. "
         "Supported backends: openai_api, mock, manual_chatgpt, codex."
     )
+
+
+def selected_backend_name(args: argparse.Namespace, config: dict) -> str:
+    raw_backend_name = (
+        getattr(args, "backend", None)
+        or config.get("generation", {}).get("backend")
+        or config.get("llm", {}).get("provider")
+        or "openai_api"
+    )
+    return normalize_backend_name(raw_backend_name)
+
+
+def normalize_backend_name(value: str) -> str:
+    if value is None or not str(value).strip():
+        raise GenerationBackendError("Generation backend name cannot be empty.")
+
+    normalized = str(value).strip().lower().replace("-", "_")
+    aliases = {
+        "openai": "openai_api",
+        "openai_api": "openai_api",
+        "mock": "mock",
+        "mock_backend": "mock",
+        "manual": "manual_chatgpt",
+        "chatgpt_manual": "manual_chatgpt",
+        "manual_chatgpt": "manual_chatgpt",
+        "codex": "codex",
+        "codex_export": "codex",
+        "codex_backend": "codex",
+    }
+    try:
+        return aliases[normalized]
+    except KeyError as error:
+        raise GenerationBackendError(
+            f"Unknown generation backend '{value}'. "
+            "Supported backends: openai_api, mock, manual_chatgpt, codex."
+        ) from error
+
+
+def _ensure_backend_enabled(backend_name: str, config: dict) -> None:
+    backend_config = _backend_config(config, backend_name)
+    if backend_config.get("enabled", True) is False:
+        raise GenerationBackendError(
+            f"Generation backend '{backend_name}' is disabled in config.yaml."
+        )
+
+
+def _backend_config(config: dict, backend_name: str) -> dict:
+    backends_config = config.get("backends") or {}
+    if not isinstance(backends_config, dict):
+        raise GenerationBackendError("Config section 'backends' must be a mapping.")
+
+    backend_config = backends_config.get(backend_name) or {}
+    if not isinstance(backend_config, dict):
+        raise GenerationBackendError(
+            f"Config section 'backends.{backend_name}' must be a mapping."
+        )
+    return backend_config
 
 
 def main() -> None:
