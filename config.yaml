@@ -4,6 +4,7 @@ generation:
 backends:
   openai_api: {}
   mock: {}
+  manual_chatgpt: {}
 
 llm:
   provider: openai

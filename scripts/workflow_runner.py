@@ -457,6 +457,24 @@ class WorkflowRunner:
         context = self.context_builder(
             step, input_file, output_directory, completed_steps
         )
+        context = dict(context)
+        context.update(
+            {
+                "OUTPUT_ROOT": str(output_directory),
+                "PENDING_PROMPT_PATH": str(
+                    output_directory
+                    / "99-meta"
+                    / "pending-prompts"
+                    / f"{step.step_id}.prompt.md"
+                ),
+                "MANUAL_RESPONSE_PATH": str(
+                    output_directory
+                    / "99-meta"
+                    / "manual-responses"
+                    / f"{step.step_id}.response.md"
+                ),
+            }
+        )
         prompt = self.prompt_loader(step.prompt_template_path, context)
         generated_markdown = self.generation_backend.generate(
             step=step,

@@ -1,6 +1,6 @@
 # AI Agile Workflow
 
-AI Agile Workflow is a local Python CLI that turns a Markdown app idea into a structured agile planning package. It runs a fixed sequence of prompt templates, sends each rendered prompt to either a fake offline LLM or the OpenAI API, validates the Markdown response, writes outputs, and records workflow state locally.
+AI Agile Workflow is a local Python CLI that turns a Markdown app idea into a structured agile planning package. It runs a fixed sequence of prompt templates, sends each rendered prompt to a configurable generation backend, validates the Markdown response, writes outputs, and records workflow state locally.
 
 The MVP is intentionally script-based. It does not include a web UI, database, RAG system, vector store, or multi-agent orchestration.
 
@@ -28,6 +28,14 @@ OPENAI_API_KEY=your_api_key_here python run_workflow.py --input input/app-idea.m
 
 You can also put `OPENAI_API_KEY` in a local `.env` file. Secrets are not read from `config.yaml`.
 
+Run with manual ChatGPT prompt export and response import:
+
+```bash
+python run_workflow.py --input input/app-idea.md --output output/manual-project
+```
+
+Set `generation.backend: manual_chatgpt` in `config.yaml` first. This mode does not require `OPENAI_API_KEY`.
+
 ## CLI Usage
 
 Required flags:
@@ -47,6 +55,29 @@ python run_workflow.py --input input/app-idea.md --output output/my-project --st
 ```
 
 Use `--mock-llm` for local testing without network access or API keys. Omit it for real OpenAI generation.
+
+## Manual ChatGPT Mode
+
+Manual ChatGPT mode is a subscription-friendly backend that avoids API calls. Configure:
+
+```yaml
+generation:
+  backend: manual_chatgpt
+```
+
+For each workflow step, the backend exports the rendered prompt to:
+
+```text
+output/my-project/99-meta/pending-prompts/<step-id>.prompt.md
+```
+
+The terminal then tells you where to save the ChatGPT response:
+
+```text
+output/my-project/99-meta/manual-responses/<step-id>.response.md
+```
+
+Paste the prompt into ChatGPT, save the Markdown response at that path, then press Enter in the terminal. The backend imports the response, checks that it is not empty, and the normal workflow validation and output writer continue from there.
 
 ## Input Format
 
@@ -83,6 +114,8 @@ output/my-project/
   07-quality/
   08-documentation/
   99-meta/
+    pending-prompts/
+    manual-responses/
 ```
 
 Generated documents include YAML frontmatter for Markdown tools such as Obsidian while remaining readable in VS Code, Cursor, GitHub, and plain Markdown editors.
@@ -114,7 +147,8 @@ docs/                 # User and developer documentation
 
 ## Known Limitations
 
-- The real provider implementation currently targets OpenAI.
+- API-backed generation currently targets OpenAI.
+- Manual ChatGPT mode is semi-manual and does not automate or scrape the ChatGPT UI.
 - Prompt rendering uses simple `{{PLACEHOLDER}}` replacement, not Jinja.
 - Review mode is terminal-based.
 - State is local JSON, not collaborative or remotely synchronized.
@@ -122,4 +156,4 @@ docs/                 # User and developer documentation
 
 ## Extension Points
 
-Future work can add provider adapters behind `generate(prompt: str) -> str`, richer validators, alternate prompt packs, metadata exporters, or a UI without changing the core runner contract.
+Future work can add provider adapters behind the `GenerationBackend` interface, richer validators, alternate prompt packs, metadata exporters, or a UI without changing the core runner contract.

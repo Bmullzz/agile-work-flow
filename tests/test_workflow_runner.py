@@ -180,7 +180,19 @@ class WorkflowRunnerTests(unittest.TestCase):
         backend_step, backend_prompt, backend_context = generation_backend.calls[0]
         self.assertEqual(backend_step.step_id, "00-first")
         self.assertEqual(backend_prompt, "# Rendered Prompt")
-        self.assertEqual(backend_context, {"APP_IDEA": "idea", "PROJECT_CONTEXT": ""})
+        self.assertEqual(backend_context["APP_IDEA"], "idea")
+        self.assertEqual(backend_context["PROJECT_CONTEXT"], "")
+        self.assertEqual(backend_context["OUTPUT_ROOT"], str(self.output_root))
+        self.assertTrue(
+            backend_context["PENDING_PROMPT_PATH"].endswith(
+                "99-meta/pending-prompts/00-first.prompt.md"
+            )
+        )
+        self.assertTrue(
+            backend_context["MANUAL_RESPONSE_PATH"].endswith(
+                "99-meta/manual-responses/00-first.response.md"
+            )
+        )
         self.assertTrue(result.output_paths["00-first"].exists())
         self.assertIn(
             'document_id: "00-first"',

@@ -19,6 +19,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "backends": {
         "openai_api": {},
         "mock": {},
+        "manual_chatgpt": {},
     },
     "llm": {
         "provider": "openai",

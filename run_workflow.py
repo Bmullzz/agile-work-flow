@@ -7,6 +7,7 @@ import argparse
 from pathlib import Path
 
 from scripts.backends.base import GenerationBackendError
+from scripts.backends.manual_chatgpt_backend import ManualChatGPTBackend
 from scripts.backends.mock_backend import MockGenerationBackend
 from scripts.backends.openai_api_backend import OpenAIAPIBackend
 from scripts.config_loader import load_config
@@ -113,9 +114,11 @@ def create_generation_backend(args: argparse.Namespace, config: dict, logger=Non
         return OpenAIAPIBackend(config, logger=logger)
     if backend_name in {"mock", "mock_backend"}:
         return MockGenerationBackend()
+    if backend_name in {"manual_chatgpt", "chatgpt_manual", "manual"}:
+        return ManualChatGPTBackend()
     raise GenerationBackendError(
         f"Unknown generation backend '{backend_name}'. "
-        "Supported backends: openai_api, mock."
+        "Supported backends: openai_api, mock, manual_chatgpt."
     )
 
 

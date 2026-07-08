@@ -6,6 +6,7 @@ from pathlib import Path
 
 from run_workflow import create_generation_backend
 from scripts.backends.base import GenerationBackend, GenerationBackendError
+from scripts.backends.manual_chatgpt_backend import ManualChatGPTBackend
 from scripts.backends.mock_backend import MockGenerationBackend
 from scripts.models import WorkflowStep
 from scripts.workflow_runner import WorkflowRunner
@@ -74,7 +75,21 @@ class GenerationBackendTests(unittest.TestCase):
             self.assertEqual(len(backend.calls), 1)
             self.assertIs(backend.calls[0]["step"], step)
             self.assertEqual(backend.calls[0]["prompt"], "# Rendered Prompt")
-            self.assertEqual(backend.calls[0]["context"], {"APP_IDEA": "idea"})
+            self.assertEqual(backend.calls[0]["context"]["APP_IDEA"], "idea")
+            self.assertEqual(
+                backend.calls[0]["context"]["OUTPUT_ROOT"],
+                str(output_root),
+            )
+            self.assertTrue(
+                backend.calls[0]["context"]["PENDING_PROMPT_PATH"].endswith(
+                    "99-meta/pending-prompts/00-test.prompt.md"
+                )
+            )
+            self.assertTrue(
+                backend.calls[0]["context"]["MANUAL_RESPONSE_PATH"].endswith(
+                    "99-meta/manual-responses/00-test.response.md"
+                )
+            )
 
     def test_unknown_backend_configuration_fails_clearly(self):
         args = argparse.Namespace(mock_llm=False)
@@ -95,6 +110,18 @@ class GenerationBackendTests(unittest.TestCase):
         backend = create_generation_backend(args, {"generation": {"backend": "openai_api"}})
 
         self.assertIsInstance(backend, MockGenerationBackend)
+
+    def test_manual_chatgpt_backend_can_be_selected_without_api_key(self):
+        original_api_key = os.environ.pop("OPENAI_API_KEY", None)
+        self.addCleanup(self._restore_api_key, original_api_key)
+        args = argparse.Namespace(mock_llm=False)
+
+        backend = create_generation_backend(
+            args,
+            {"generation": {"backend": "manual_chatgpt"}},
+        )
+
+        self.assertIsInstance(backend, ManualChatGPTBackend)
 
     def _restore_api_key(self, value):
         if value is not None:

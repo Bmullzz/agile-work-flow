@@ -106,6 +106,13 @@ def validate_markdown_content(
     return _result(path=None, is_valid=not errors, errors=errors, warnings=warnings)
 
 
+def validate_non_empty_text(content: str, label: str = "Content") -> dict[str, Any]:
+    errors: list[str] = []
+    if content is None or not str(content).strip():
+        errors.append(f"{label} is empty.")
+    return _result(path=None, is_valid=not errors, errors=errors, warnings=[])
+
+
 def validate_generated_markdown(
     content: str, required_sections: list[str] | None = None
 ) -> dict[str, Any]:
