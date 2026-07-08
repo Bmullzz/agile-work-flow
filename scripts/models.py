@@ -69,6 +69,7 @@ class WorkflowState:
     workflow_status: str = "not_started"
     completed_steps: list[str] = field(default_factory=list)
     output_files: dict[str, str] = field(default_factory=dict)
+    generated_documents: dict[str, dict] = field(default_factory=dict)
     failed_step: str | None = None
     current_step: str | None = None
     next_step: str | None = None
@@ -84,6 +85,10 @@ class WorkflowState:
             "workflow_status": self.workflow_status,
             "completed_steps": list(self.completed_steps),
             "output_files": dict(self.output_files),
+            "generated_documents": {
+                step_id: dict(metadata)
+                for step_id, metadata in self.generated_documents.items()
+            },
             "failed_step": self.failed_step,
             "current_step": self.current_step,
             "next_step": self.next_step,
@@ -101,6 +106,10 @@ class WorkflowState:
             workflow_status=data.get("workflow_status", "not_started"),
             completed_steps=list(data.get("completed_steps", [])),
             output_files=dict(data.get("output_files", {})),
+            generated_documents={
+                step_id: dict(metadata)
+                for step_id, metadata in data.get("generated_documents", {}).items()
+            },
             failed_step=data.get("failed_step"),
             current_step=data.get("current_step"),
             next_step=data.get("next_step"),

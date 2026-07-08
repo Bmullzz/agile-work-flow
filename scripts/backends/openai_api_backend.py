@@ -13,6 +13,9 @@ from scripts.logger import get_workflow_logger, redact_secrets
 class OpenAIAPIBackend(GenerationBackend):
     """OpenAI-backed generation backend."""
 
+    backend_name = "openai_api"
+    generation_mode = "automated_api"
+
     def __init__(
         self,
         config: dict[str, Any],

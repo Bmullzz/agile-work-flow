@@ -10,6 +10,9 @@ from scripts.backends.base import GenerationBackend
 class MockGenerationBackend(GenerationBackend):
     """Offline backend that returns stable Markdown without credentials."""
 
+    backend_name = "mock"
+    generation_mode = "deterministic_mock"
+
     def generate(self, step: Any, prompt: str, context: dict[str, Any]) -> str:
         if prompt is None:
             raise ValueError("Prompt cannot be None.")

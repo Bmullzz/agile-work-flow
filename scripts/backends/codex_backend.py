@@ -12,6 +12,9 @@ from scripts.codex_task_writer import CodexTaskWriter
 class CodexBackend(GenerationBackend):
     """Export each workflow step as a Codex-ready task packet."""
 
+    backend_name = "codex"
+    generation_mode = "task_export"
+
     def __init__(
         self,
         writer: CodexTaskWriter | None = None,

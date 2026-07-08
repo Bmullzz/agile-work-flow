@@ -86,11 +86,26 @@ def mark_step_completed(
     step_id: str,
     output_file: str | Path,
     next_step: str | None = None,
+    generation_metadata: dict[str, Any] | None = None,
 ) -> WorkflowState:
     _clear_step_stale(state, step_id)
     if step_id not in state.completed_steps:
         state.completed_steps.append(step_id)
     state.output_files[step_id] = str(output_file)
+    if generation_metadata is not None:
+        mark_step_generation_metadata(
+            state,
+            step_id,
+            {
+                **generation_metadata,
+                "step_id": step_id,
+                "status": "generated",
+                "output_file": str(output_file),
+            },
+        )
+    elif step_id in state.generated_documents:
+        state.generated_documents[step_id]["status"] = "generated"
+        state.generated_documents[step_id]["output_file"] = str(output_file)
     state.current_step = None
     state.next_step = next_step
     state.failed_step = None
@@ -103,9 +118,24 @@ def mark_step_skipped(
     step_id: str,
     output_file: str | Path,
     next_step: str | None = None,
+    generation_metadata: dict[str, Any] | None = None,
 ) -> WorkflowState:
     _clear_step_stale(state, step_id)
     state.output_files[step_id] = str(output_file)
+    if generation_metadata is not None:
+        mark_step_generation_metadata(
+            state,
+            step_id,
+            {
+                **generation_metadata,
+                "step_id": step_id,
+                "status": "skipped",
+                "output_file": str(output_file),
+            },
+        )
+    elif step_id in state.generated_documents:
+        state.generated_documents[step_id]["status"] = "skipped"
+        state.generated_documents[step_id]["output_file"] = str(output_file)
     state.current_step = None
     state.next_step = next_step
     state.failed_step = None
@@ -117,6 +147,8 @@ def mark_step_failed(state: WorkflowState, step_id: str) -> WorkflowState:
     state.workflow_status = "failed"
     state.failed_step = step_id
     state.current_step = step_id
+    if step_id in state.generated_documents:
+        state.generated_documents[step_id]["status"] = "failed"
     return state
 
 
@@ -134,6 +166,21 @@ def mark_step_approved(state: WorkflowState, step_id: str) -> WorkflowState:
         state.approved_steps.append(step_id)
     if state.pending_review_step == step_id:
         state.pending_review_step = None
+    if step_id in state.generated_documents:
+        state.generated_documents[step_id]["status"] = "approved"
+        state.generated_documents[step_id]["review_status"] = "approved"
+    return state
+
+
+def mark_step_generation_metadata(
+    state: WorkflowState, step_id: str, metadata: dict[str, Any]
+) -> WorkflowState:
+    if not isinstance(metadata, dict):
+        raise WorkflowStateError("Step generation metadata must be a mapping.")
+    existing_metadata = dict(state.generated_documents.get(step_id, {}))
+    existing_metadata.update(dict(metadata))
+    existing_metadata["step_id"] = step_id
+    state.generated_documents[step_id] = existing_metadata
     return state
 
 

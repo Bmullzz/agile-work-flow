@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Optional
 
 from scripts.backends.base import GenerationBackend
 from scripts.llm_client import FakeLLMClient
@@ -45,6 +46,21 @@ class RecordingGenerationBackend(GenerationBackend):
     def generate(self, step, prompt, context):
         self.calls.append((step, prompt, context))
         return self.response
+
+
+class MetadataGenerationBackend(RecordingGenerationBackend):
+    def __init__(
+        self,
+        backend_name: str,
+        generation_mode: str,
+        response: str = "# Generated\n\nContent",
+        model: Optional[str] = None,
+    ):
+        super().__init__(response=response)
+        self.backend_name = backend_name
+        self.generation_mode = generation_mode
+        if model is not None:
+            self.model = model
 
 
 class ScriptedReviewGate:
@@ -208,6 +224,170 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(state.workflow_status, "completed")
         self.assertEqual(state.completed_steps, ["00-first"])
         self.assertIn("00-first", state.output_files)
+
+    def test_state_records_manual_backend_artifacts(self):
+        backend = MetadataGenerationBackend(
+            "manual_chatgpt",
+            "manual_import",
+            "# Generated\n\nOutput",
+        )
+        runner = WorkflowRunner(
+            config={},
+            workflow_steps=[self.make_steps()[0]],
+            prompt_loader=lambda path, context: "# Rendered Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {
+                "APP_IDEA": "idea"
+            },
+            generation_backend=backend,
+        )
+
+        runner.run(self.input_path, self.output_root)
+
+        state = load_state(self.output_root / ".workflow-state.json")
+        metadata = state.generated_documents["00-first"]
+        output_text = (self.output_root / "00-first.md").read_text(encoding="utf-8")
+        self.assertEqual(metadata["generation_backend"], "manual_chatgpt")
+        self.assertEqual(metadata["generation_mode"], "manual_import")
+        self.assertIn('generation_backend: "manual_chatgpt"', output_text)
+        self.assertIn('generation_mode: "manual_import"', output_text)
+        self.assertEqual(
+            metadata["prompt_file"],
+            "99-meta/pending-prompts/00-first.prompt.md",
+        )
+        self.assertEqual(
+            metadata["response_file"],
+            "99-meta/manual-responses/00-first.response.md",
+        )
+        self.assertNotIn("OPENAI_API_KEY", str(metadata))
+
+    def test_state_records_codex_task_folder(self):
+        backend = MetadataGenerationBackend(
+            "codex",
+            "task_export",
+            "# Generated\n\nOutput",
+        )
+        runner = WorkflowRunner(
+            config={"backends": {"codex": {"task_export_dir": "custom/codex-tasks"}}},
+            workflow_steps=[self.make_steps()[0]],
+            prompt_loader=lambda path, context: "# Rendered Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {
+                "APP_IDEA": "idea"
+            },
+            generation_backend=backend,
+        )
+
+        runner.run(self.input_path, self.output_root)
+
+        state = load_state(self.output_root / ".workflow-state.json")
+        metadata = state.generated_documents["00-first"]
+        self.assertEqual(metadata["generation_backend"], "codex")
+        self.assertEqual(metadata["generation_mode"], "task_export")
+        self.assertEqual(metadata["task_folder"], "custom/codex-tasks/00-first")
+        self.assertEqual(metadata["target_output"], "00-first.md")
+
+    def test_state_records_openai_model_without_secrets(self):
+        backend = MetadataGenerationBackend(
+            "openai_api",
+            "automated_api",
+            "# Generated\n\nOutput",
+            model="gpt-test",
+        )
+        runner = WorkflowRunner(
+            config={},
+            workflow_steps=[self.make_steps()[0]],
+            prompt_loader=lambda path, context: "# Rendered Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {
+                "APP_IDEA": "idea"
+            },
+            generation_backend=backend,
+        )
+
+        runner.run(self.input_path, self.output_root)
+
+        state_text = (self.output_root / ".workflow-state.json").read_text(
+            encoding="utf-8"
+        )
+        metadata = load_state(self.output_root / ".workflow-state.json").generated_documents[
+            "00-first"
+        ]
+        self.assertEqual(metadata["generation_backend"], "openai_api")
+        self.assertEqual(metadata["generation_mode"], "automated_api")
+        self.assertEqual(metadata["model"], "gpt-test")
+        self.assertNotIn("secret", state_text.lower())
+
+    def test_review_skip_preserves_generation_metadata(self):
+        backend = MetadataGenerationBackend(
+            "mock",
+            "deterministic_mock",
+            "# Generated\n\nOutput",
+        )
+        runner = WorkflowRunner(
+            config={"workflow": {"default_review": True}},
+            workflow_steps=[self.make_steps()[0]],
+            prompt_loader=lambda path, context: "# Rendered Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {
+                "APP_IDEA": "idea"
+            },
+            generation_backend=backend,
+            review_gate=ScriptedReviewGate([ReviewDecision.SKIP]),
+        )
+
+        result = runner.run(self.input_path, self.output_root, review=True)
+
+        state = load_state(self.output_root / ".workflow-state.json")
+        metadata = state.generated_documents["00-first"]
+        self.assertEqual(result.skipped_step_ids, ["00-first"])
+        self.assertEqual(metadata["generation_backend"], "mock")
+        self.assertEqual(metadata["generation_mode"], "deterministic_mock")
+        self.assertEqual(metadata["status"], "approved")
+        self.assertEqual(metadata["output_file"], str(self.output_root / "00-first.md"))
+
+    def test_resume_preserves_backend_metadata(self):
+        first_step, second_step = self.make_steps()
+        output_path = self.output_root / first_step.output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("# Existing\n\nContent", encoding="utf-8")
+        state = create_initial_state(
+            "test-project",
+            self.input_path,
+            self.output_root,
+            next_step="01-second",
+        )
+        mark_step_completed(
+            state,
+            first_step.step_id,
+            output_path,
+            next_step="01-second",
+            generation_metadata={
+                "generation_backend": "mock",
+                "generation_mode": "deterministic_mock",
+            },
+        )
+        save_state(state, self.output_root / ".workflow-state.json")
+        backend = MetadataGenerationBackend(
+            "mock",
+            "deterministic_mock",
+            "# Generated\n\nOutput",
+        )
+        runner = WorkflowRunner(
+            config={},
+            workflow_steps=[first_step, second_step],
+            prompt_loader=lambda path, context: "# Rendered Prompt",
+            context_builder=lambda step, input_path, output_root, completed_steps: {
+                "APP_IDEA": "idea"
+            },
+            generation_backend=backend,
+        )
+
+        runner.run(self.input_path, self.output_root, resume=True)
+
+        loaded = load_state(self.output_root / ".workflow-state.json")
+        self.assertEqual(
+            loaded.generated_documents["00-first"]["generation_backend"], "mock"
+        )
+        self.assertEqual(
+            loaded.generated_documents["01-second"]["generation_backend"], "mock"
+        )
 
     def test_failure_stops_workflow(self):
         llm_client = RecordingLLMClient("not markdown")

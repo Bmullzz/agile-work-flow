@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from scripts.models import WorkflowStep
+from scripts.models import WorkflowState, WorkflowStep
 
 
 class WorkflowStepTests(unittest.TestCase):
@@ -98,6 +98,30 @@ class WorkflowStepTests(unittest.TestCase):
                 prompt_template_path="",
                 output_path="output/missing-path.md",
             )
+
+
+class WorkflowStateModelTests(unittest.TestCase):
+    def test_generated_documents_default_and_serialization(self):
+        state = WorkflowState(
+            project_name="test-project",
+            input_file="input/app-idea.md",
+            output_folder="output/test-project",
+        )
+
+        self.assertEqual(state.generated_documents, {})
+
+        state.generated_documents["00-app-intake"] = {
+            "step_id": "00-app-intake",
+            "generation_backend": "mock",
+            "generation_mode": "deterministic_mock",
+        }
+
+        loaded = WorkflowState.from_dict(state.to_dict())
+
+        self.assertEqual(
+            loaded.generated_documents["00-app-intake"]["generation_backend"],
+            "mock",
+        )
 
 
 if __name__ == "__main__":

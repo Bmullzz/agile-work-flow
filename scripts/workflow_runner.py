@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import logging
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
@@ -94,6 +95,7 @@ class WorkflowRunner:
             fail_on_warnings=self.fail_on_warnings
         )
         self.logger = logger or get_workflow_logger()
+        self._generation_metadata_by_step: dict[str, dict[str, Any]] = {}
 
     def run(
         self,
@@ -267,6 +269,12 @@ class WorkflowRunner:
                 self._next_step_id(steps_to_run, index),
                 skipped=review_outcome == ReviewDecision.SKIP,
             )
+            if review_outcome in {
+                ReviewDecision.APPROVE,
+                ReviewDecision.EDIT,
+                ReviewDecision.SKIP,
+            }:
+                mark_step_approved(state, step.step_id)
             self._save_state_safely(state, state_path)
             print(f"[{step.step_id}] Wrote {output_path}")
             self.logger.info(
@@ -482,12 +490,18 @@ class WorkflowRunner:
             context=context,
         )
         self._validate_generated_markdown(step, generated_markdown)
+        generation_metadata = self._generation_metadata_for_step(
+            step, output_directory, context, review_enabled
+        )
+        self._generation_metadata_by_step[step.step_id] = generation_metadata
         output_path = self.markdown_writer(
             output_directory,
             step.output_path,
             generated_markdown,
             overwrite,
-            frontmatter=self._frontmatter_for_step(step, review_enabled),
+            frontmatter=self._frontmatter_for_step(
+                step, review_enabled, generation_metadata
+            ),
         )
         return output_path
 
@@ -519,9 +533,13 @@ class WorkflowRunner:
         return backend_config
 
     def _frontmatter_for_step(
-        self, step: WorkflowStep, review_enabled: bool
+        self,
+        step: WorkflowStep,
+        review_enabled: bool,
+        generation_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        metadata = generation_metadata or {}
+        frontmatter = {
             "title": step.name,
             "document_id": step.step_id,
             "document_type": "workflow_output",
@@ -535,6 +553,65 @@ class WorkflowRunner:
                 f"ai-agile/{step.step_id}",
             ],
         }
+        for key in (
+            "generation_backend",
+            "generation_mode",
+            "model",
+            "prompt_file",
+            "response_file",
+            "task_folder",
+            "target_output",
+            "generated_at",
+        ):
+            if key in metadata:
+                frontmatter[key] = metadata[key]
+        return frontmatter
+
+    def _generation_metadata_for_step(
+        self,
+        step: WorkflowStep,
+        output_directory: Path,
+        context: dict[str, Any],
+        review_enabled: bool,
+    ) -> dict[str, Any]:
+        backend_name = getattr(self.generation_backend, "backend_name", None)
+        generation_mode = getattr(self.generation_backend, "generation_mode", None)
+        if backend_name is None:
+            backend_name = self.generation_backend.__class__.__name__
+        if generation_mode is None:
+            generation_mode = "automated"
+        generated_at = (
+            "not recorded"
+            if backend_name == "mock"
+            else datetime.now(timezone.utc).isoformat()
+        )
+
+        metadata: dict[str, Any] = {
+            "step_id": step.step_id,
+            "status": "generated",
+            "review_status": "pending" if review_enabled else "not_required",
+            "generation_backend": backend_name,
+            "generation_mode": generation_mode,
+            "target_output": _relative_path(output_directory / step.output_path, output_directory),
+            "generated_at": generated_at,
+        }
+
+        model = getattr(self.generation_backend, "model", None)
+        if model:
+            metadata["model"] = str(model)
+
+        if backend_name == "manual_chatgpt":
+            metadata["prompt_file"] = _relative_path(
+                Path(context["PENDING_PROMPT_PATH"]), output_directory
+            )
+            metadata["response_file"] = _relative_path(
+                Path(context["MANUAL_RESPONSE_PATH"]), output_directory
+            )
+        elif backend_name == "codex":
+            metadata["task_folder"] = _relative_path(
+                Path(context["CODEX_TASK_PATH"]), output_directory
+            )
+        return metadata
 
     def _review_step_if_needed(
         self,
@@ -604,9 +681,21 @@ class WorkflowRunner:
         if skipped:
             if step.step_id not in result.skipped_step_ids:
                 result.skipped_step_ids.append(step.step_id)
-            mark_step_skipped(state, step.step_id, output_path, next_step=next_step_id)
+            mark_step_skipped(
+                state,
+                step.step_id,
+                output_path,
+                next_step=next_step_id,
+                generation_metadata=self._generation_metadata_by_step.get(step.step_id),
+            )
         else:
-            mark_step_completed(state, step.step_id, output_path, next_step=next_step_id)
+            mark_step_completed(
+                state,
+                step.step_id,
+                output_path,
+                next_step=next_step_id,
+                generation_metadata=self._generation_metadata_by_step.get(step.step_id),
+            )
 
     def _stop_on_failure(self) -> bool:
         return bool(self.config.get("workflow", {}).get("stop_on_failure", True))
@@ -708,3 +797,10 @@ class _LLMClientBackendAdapter:
 
     def generate(self, step: Any, prompt: str, context: dict[str, Any]) -> str:
         return self.llm_client.generate(prompt)
+
+
+def _relative_path(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()

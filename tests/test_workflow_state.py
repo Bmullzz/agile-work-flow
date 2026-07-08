@@ -8,6 +8,7 @@ from scripts.workflow_state import (
     create_initial_state,
     load_state,
     mark_downstream_steps_stale,
+    mark_step_generation_metadata,
     mark_step_approved,
     mark_step_completed,
     mark_step_failed,
@@ -74,6 +75,58 @@ class WorkflowStateTests(unittest.TestCase):
         self.assertEqual(state.workflow_status, "running")
         self.assertEqual(state.next_step, "01-product-vision")
 
+    def test_mark_step_completed_records_generation_metadata(self):
+        state = create_initial_state("test-project", "input.md", "output")
+
+        mark_step_completed(
+            state,
+            "03-system-architecture",
+            "output/02-technical/03-system-architecture.md",
+            generation_metadata={
+                "generation_backend": "manual_chatgpt",
+                "generation_mode": "manual_import",
+                "prompt_file": "99-meta/pending-prompts/03-system-architecture.prompt.md",
+                "response_file": "99-meta/manual-responses/03-system-architecture.response.md",
+                "generated_at": "2026-07-03T12:00:00-04:00",
+            },
+        )
+
+        metadata = state.generated_documents["03-system-architecture"]
+        self.assertEqual(metadata["generation_backend"], "manual_chatgpt")
+        self.assertEqual(metadata["generation_mode"], "manual_import")
+        self.assertEqual(
+            metadata["prompt_file"],
+            "99-meta/pending-prompts/03-system-architecture.prompt.md",
+        )
+        self.assertEqual(
+            metadata["response_file"],
+            "99-meta/manual-responses/03-system-architecture.response.md",
+        )
+        self.assertEqual(metadata["status"], "generated")
+
+    def test_mark_step_generation_metadata_merges_and_serializes(self):
+        state = create_initial_state("test-project", "input.md", "output")
+
+        mark_step_generation_metadata(
+            state,
+            "03-system-architecture",
+            {
+                "generation_backend": "codex",
+                "generation_mode": "task_export",
+                "task_folder": "99-meta/codex-tasks/03-system-architecture",
+                "target_output": "02-technical/03-system-architecture.md",
+            },
+        )
+        save_state(state, self.state_path)
+
+        loaded = load_state(self.state_path)
+        metadata = loaded.generated_documents["03-system-architecture"]
+        self.assertEqual(metadata["generation_backend"], "codex")
+        self.assertEqual(
+            metadata["task_folder"],
+            "99-meta/codex-tasks/03-system-architecture",
+        )
+
     def test_mark_failed_step(self):
         state = create_initial_state("test-project", "input.md", "output")
 
@@ -86,11 +139,18 @@ class WorkflowStateTests(unittest.TestCase):
     def test_mark_step_approved(self):
         state = create_initial_state("test-project", "input.md", "output")
         state.pending_review_step = "00-app-intake"
+        state.generated_documents["00-app-intake"] = {
+            "step_id": "00-app-intake",
+            "status": "generated",
+        }
 
         mark_step_approved(state, "00-app-intake")
 
         self.assertEqual(state.approved_steps, ["00-app-intake"])
         self.assertIsNone(state.pending_review_step)
+        self.assertEqual(
+            state.generated_documents["00-app-intake"]["status"], "approved"
+        )
 
     def test_mark_step_skipped_tracks_output_without_completed_step(self):
         state = create_initial_state("test-project", "input.md", "output")
@@ -100,6 +160,25 @@ class WorkflowStateTests(unittest.TestCase):
         self.assertEqual(state.completed_steps, [])
         self.assertEqual(state.output_files["00-app-intake"], "output/00.md")
         self.assertEqual(state.next_step, "01-next")
+
+    def test_mark_step_skipped_records_generation_metadata(self):
+        state = create_initial_state("test-project", "input.md", "output")
+
+        mark_step_skipped(
+            state,
+            "00-app-intake",
+            "output/00.md",
+            generation_metadata={
+                "generation_backend": "mock",
+                "generation_mode": "deterministic_mock",
+            },
+        )
+
+        metadata = state.generated_documents["00-app-intake"]
+        self.assertEqual(metadata["generation_backend"], "mock")
+        self.assertEqual(metadata["generation_mode"], "deterministic_mock")
+        self.assertEqual(metadata["status"], "skipped")
+        self.assertEqual(metadata["output_file"], "output/00.md")
 
     def test_mark_workflow_quit_pauses_state(self):
         state = create_initial_state("test-project", "input.md", "output")

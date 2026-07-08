@@ -625,6 +625,19 @@ class IndexWriter:
                     lines.append(f"- {step_id}")
             else:
                 lines.append("- None")
+            lines.extend(["", "## Generated Documents", ""])
+            generated_documents = state.get("generated_documents") or {}
+            if generated_documents:
+                for step_id in sorted(generated_documents):
+                    metadata = generated_documents[step_id]
+                    backend = metadata.get("generation_backend", "unknown")
+                    mode = metadata.get("generation_mode", "unknown")
+                    status = metadata.get("status", "unknown")
+                    lines.append(
+                        f"- {step_id}: {status} via {backend} ({mode})"
+                    )
+            else:
+                lines.append("- None")
         else:
             lines.append("Workflow state was not available when this file was generated.")
         lines.append("")

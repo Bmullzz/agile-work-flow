@@ -13,6 +13,9 @@ from scripts.validators import validate_non_empty_text
 class ManualChatGPTBackend(GenerationBackend):
     """Export prompts and import manually pasted ChatGPT responses."""
 
+    backend_name = "manual_chatgpt"
+    generation_mode = "manual_import"
+
     def __init__(
         self,
         input_func: Callable[[str], str] = input,
