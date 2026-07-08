@@ -473,6 +473,11 @@ class WorkflowRunner:
                     / "manual-responses"
                     / f"{step.step_id}.response.md"
                 ),
+                "CODEX_TASK_PATH": str(
+                    output_directory / "99-meta" / "codex-tasks" / step.step_id
+                ),
+                "TARGET_OUTPUT_PATH": str(output_directory / step.output_path),
+                "OVERWRITE": overwrite,
             }
         )
         prompt = self.prompt_loader(step.prompt_template_path, context)

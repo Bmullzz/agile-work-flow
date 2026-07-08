@@ -20,6 +20,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "openai_api": {},
         "mock": {},
         "manual_chatgpt": {},
+        "codex": {},
     },
     "llm": {
         "provider": "openai",

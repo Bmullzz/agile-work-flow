@@ -36,6 +36,14 @@ python run_workflow.py --input input/app-idea.md --output output/manual-project
 
 Set `generation.backend: manual_chatgpt` in `config.yaml` first. This mode does not require `OPENAI_API_KEY`.
 
+Run with Codex task packet export:
+
+```bash
+python run_workflow.py --input input/app-idea.md --output output/codex-project
+```
+
+Set `generation.backend: codex` in `config.yaml` first. This mode exports self-contained task packets and does not require `OPENAI_API_KEY`.
+
 ## CLI Usage
 
 Required flags:
@@ -79,6 +87,18 @@ output/my-project/99-meta/manual-responses/<step-id>.response.md
 
 Paste the prompt into ChatGPT, save the Markdown response at that path, then press Enter in the terminal. The backend imports the response, checks that it is not empty, and the normal workflow validation and output writer continue from there.
 
+## Codex Export Mode
+
+Codex export mode creates one task packet per workflow step under:
+
+```text
+output/my-project/99-meta/codex-tasks/<step-id>/
+```
+
+Each packet contains `prompt.md`, `context.md`, `expected-output.md`, `target-file.txt`, and `instructions.md`. Open the task folder in Codex, ask it to read those files, and have it create or update the file listed in `target-file.txt`.
+
+This first version is export-only. It does not run the Codex CLI automatically.
+
 ## Input Format
 
 The only required user input is a meaningful Markdown app idea file. `# App Idea` is recommended, but optional when the description is clear.
@@ -114,6 +134,7 @@ output/my-project/
   07-quality/
   08-documentation/
   99-meta/
+    codex-tasks/
     pending-prompts/
     manual-responses/
 ```

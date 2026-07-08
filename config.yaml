@@ -5,6 +5,7 @@ backends:
   openai_api: {}
   mock: {}
   manual_chatgpt: {}
+  codex: {}
 
 llm:
   provider: openai

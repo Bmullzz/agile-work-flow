@@ -215,6 +215,7 @@ class IndexWriter:
                     "- [Prompt Index](06-agent-prompts/prompt-index.md)",
                     "- [Project Setup Prompt](06-agent-prompts/13-project-setup-prompt.md) - run this first",
                     f"- [Coding-Agent Prompts]({_markdown_link(coding_agent_step.output_path)})",
+                    "- [Codex Task Packets](99-meta/codex-tasks/)",
                     "",
                 ]
             )

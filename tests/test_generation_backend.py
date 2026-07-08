@@ -6,6 +6,7 @@ from pathlib import Path
 
 from run_workflow import create_generation_backend
 from scripts.backends.base import GenerationBackend, GenerationBackendError
+from scripts.backends.codex_backend import CodexBackend
 from scripts.backends.manual_chatgpt_backend import ManualChatGPTBackend
 from scripts.backends.mock_backend import MockGenerationBackend
 from scripts.models import WorkflowStep
@@ -90,6 +91,15 @@ class GenerationBackendTests(unittest.TestCase):
                     "99-meta/manual-responses/00-test.response.md"
                 )
             )
+            self.assertTrue(
+                backend.calls[0]["context"]["CODEX_TASK_PATH"].endswith(
+                    "99-meta/codex-tasks/00-test"
+                )
+            )
+            self.assertEqual(
+                backend.calls[0]["context"]["TARGET_OUTPUT_PATH"],
+                str(output_root / "00-test.md"),
+            )
 
     def test_unknown_backend_configuration_fails_clearly(self):
         args = argparse.Namespace(mock_llm=False)
@@ -122,6 +132,18 @@ class GenerationBackendTests(unittest.TestCase):
         )
 
         self.assertIsInstance(backend, ManualChatGPTBackend)
+
+    def test_codex_backend_can_be_selected_without_api_key(self):
+        original_api_key = os.environ.pop("OPENAI_API_KEY", None)
+        self.addCleanup(self._restore_api_key, original_api_key)
+        args = argparse.Namespace(mock_llm=False)
+
+        backend = create_generation_backend(
+            args,
+            {"generation": {"backend": "codex"}},
+        )
+
+        self.assertIsInstance(backend, CodexBackend)
 
     def _restore_api_key(self, value):
         if value is not None:
